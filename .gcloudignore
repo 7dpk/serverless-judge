@@ -1,4 +1,6 @@
 .git
 probe/
+terraform/
+docs/
 tests/
 *.md

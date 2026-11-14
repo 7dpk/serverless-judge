@@ -605,3 +605,45 @@ func TestWebFiles(t *testing.T) {
 		}
 	}
 }
+
+// A language registered after the cache was loaded is found on first use,
+// and unknown ids cannot force a registry read on every request.
+func TestLanguageMissRechecksRegistry(t *testing.T) {
+	rows := []Language{{ID: 71, Name: "Python", URL: "https://runner-python"}}
+	reads := 0
+	lc := &langCache{fetch: func(context.Context) ([]Language, error) {
+		reads++
+		return append([]Language(nil), rows...), nil
+	}}
+	if err := lc.load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if lc.get(71) == nil || reads != 1 {
+		t.Fatalf("known language: reads=%d", reads)
+	}
+
+	// Just loaded: a miss is believed without another read.
+	if lc.get(999) != nil || reads != 1 {
+		t.Fatalf("miss on a fresh cache should not reload: reads=%d", reads)
+	}
+
+	// The instance sat idle; meanwhile a language was registered.
+	rows = append(rows, Language{ID: 54, Name: "C++", URL: "https://runner-gcc"})
+	lc.mu.Lock()
+	lc.loaded = time.Now().Add(-10 * time.Second) // old enough to recheck, young enough for no background refresh
+	lc.mu.Unlock()
+	if l := lc.get(54); l == nil || l.URL != "https://runner-gcc" {
+		t.Fatalf("new language not found after a miss: %+v", l)
+	}
+	if reads != 2 {
+		t.Fatalf("want one reload, got reads=%d", reads)
+	}
+
+	// Nonsense ids right after that reload do not read again.
+	for i := 0; i < 50; i++ {
+		lc.get(100000 + i)
+	}
+	if reads != 2 {
+		t.Fatalf("unknown ids forced %d extra reads", reads-2)
+	}
+}

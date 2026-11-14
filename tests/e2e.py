@@ -27,8 +27,12 @@ def http(method, path, body=None):
     cmd = ["curl", "-sS", "-X", method, "-D", "-", "-H", "X-Auth-Token: " + KEY, URL + path]
     if body is not None:
         cmd += ["-H", "Content-Type: application/json", "--data-binary", "@-"]
-    p = subprocess.run(cmd, input=json.dumps(body).encode() if body is not None else None,
-                       capture_output=True, timeout=180)
+    data = json.dumps(body).encode() if body is not None else None
+    for attempt in range(3):
+        p = subprocess.run(cmd, input=data, capture_output=True, timeout=180)
+        if p.stdout.startswith(b"HTTP/"):
+            break
+        time.sleep(2)  # no response at all: the connection failed, not the judge
     raw = p.stdout.decode(errors="replace")
     head, _, payload = raw.partition("\r\n\r\n")
     while payload.startswith("HTTP/"):  # skip interim responses
@@ -182,6 +186,22 @@ def check_api():
                       {"language_id": 71, "source_code": b64("print(input()[::-1])"), "stdin": b64("héllo"), "expected_output": b64("olléh")})
     ok = code == 201 and r and r["status"]["id"] == ACCEPTED and base64.b64decode(r["stdout"]).decode() == "olléh\n"
     expect("base64 in and out, with non-ASCII text", ok, (code, r))
+
+    # One sandbox per submission: whatever a program leaves behind must be
+    # gone for the next one. Run back to back, so the same warm instance
+    # serves them.
+    marker = "left-" + os.urandom(6).hex()
+    places = "('/tmp', '/var/tmp', '/dev/shm', os.getcwd())"
+    plant = (f"import os\nwrote = 0\nfor d in {places}:\n    try:\n        open(os.path.join(d, '{marker}'), 'w').write('x'); wrote += 1\n"
+             "    except OSError:\n        pass\nprint(wrote > 0)")
+    look = f"import os\nprint([d for d in {places} if os.path.exists(os.path.join(d, '{marker}'))])"
+    code, r, _ = http("POST", "/submissions?wait=true", {"language_id": 71, "source_code": plant})
+    planted = code == 201 and (r.get("stdout") or "").strip() == "True"
+    seen = []
+    for _ in range(4):
+        code, r, _ = http("POST", "/submissions?wait=true", {"language_id": 71, "source_code": look})
+        seen.append(((r or {}).get("stdout") or "").strip())
+    expect("a file left by one submission is gone for the next", planted and seen == ["[]"] * 4, (planted, seen))
 
     # Async single submission: token now, result by polling.
     code, r, _ = http("POST", "/submissions", {"language_id": 71, "source_code": "print(6 * 7)", "expected_output": "42"})

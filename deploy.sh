@@ -57,25 +57,22 @@ hash_of() {
   find "$@" -type f ! -name '*_test.go' ! -name '.DS_Store' -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -c1-12
 }
 
-image_exists() { "${G[@]}" artifacts docker images describe "$1" >/dev/null 2>&1; }
-
 json_get() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1]));
 for k in sys.argv[2].split("."): d = d.get(k, {}) if isinstance(d, dict) else {}
 print(d if d != {} else sys.argv[3])' "$1" "$2" "${3:-}"; }
 
 # build <image> <context dir> <dockerfile> <machine type or ""> [build args...]
-build() {
-  local image="$1" context="$2" dockerfile="$3" machine="$4"; shift 4
-  if image_exists "$image"; then echo "up to date: ${image##*/}"; return; fi
-  local cache="${image%%:*}:cache" args=""
-  for a in "$@"; do args="$args --build-arg $a"; done
-  local extra=()
-  [ -n "$machine" ] && extra+=(--machine-type "$machine")
-  say "building ${image##*/}"
-  "${G[@]}" builds submit "$context" --config cloudbuild/image.yaml ${extra[@]+"${extra[@]}"} \
-    --substitutions "^|^_IMAGE=$image|_CACHE=$cache|_DOCKERFILE=$dockerfile|_BUILD_ARGS=$args" \
-    --suppress-logs >/dev/null || {
-      echo "build failed: ${image##*/}. Logs: gcloud builds list --limit 3, then gcloud builds log <id>" >&2; return 1; }
+# Skips the build when that tag already exists.
+build() { PROJECT="$PROJECT" cloudbuild/build.sh "$@"; }
+
+# Waits out what is left of the log routing delay (see cmd_infra), so that
+# nothing a new service logs lands in the default 30-day bucket.
+LOG_ROUTING_READY=0
+settle_logs() {
+  local left=$(( LOG_ROUTING_READY - $(date +%s) ))
+  [ "$left" -gt 0 ] || return 0
+  echo "waiting ${left}s for log routing to take effect"
+  sleep "$left"
 }
 
 # check_budget refuses to deploy instance caps that do not fit the quota.
@@ -155,6 +152,18 @@ cmd_infra() {
     done
     echo "index exemptions requested"
   fi
+  # The analytics counters are maps with a few hundred leaves per document,
+  # read only by document id. Indexed, they take about forty times the
+  # space of the data itself. Exempting the two top-level fields covers
+  # everything inside them.
+  if [ -n "$("${G[@]}" firestore indexes fields describe l --collection-group stats \
+        --database "$DB" --format 'value(indexConfig.indexes[0].queryScope)' 2>/dev/null)" ]; then
+    for f in t l; do
+      "${G[@]}" firestore indexes fields update "$f" --collection-group stats --database "$DB" \
+        --disable-indexes --async >/dev/null 2>&1 || true
+    done
+    echo "analytics index exemptions requested"
+  fi
 
   say "logs kept for 7 days"
   # Request and service logs of the judge go to their own bucket with 7-day
@@ -168,8 +177,12 @@ cmd_infra() {
   "${G[@]}" logging sinks describe judge-logs >/dev/null 2>&1 ||
     "${G[@]}" logging sinks create judge-logs \
       "logging.googleapis.com/projects/$PROJECT/locations/global/buckets/judge-logs" --log-filter "$logfilter" >/dev/null
-  "${G[@]}" logging sinks describe _Default --format 'value(exclusions[].name)' 2>/dev/null | grep -q serverless-judge ||
+  if ! "${G[@]}" logging sinks describe _Default --format 'value(exclusions[].name)' 2>/dev/null | grep -q serverless-judge; then
     "${G[@]}" logging sinks update _Default --add-exclusion "name=serverless-judge,filter=$logfilter" >/dev/null
+    # A new routing rule took up to 4 minutes to be applied when measured.
+    # settle_logs holds the first service deploy of this run until then.
+    LOG_ROUTING_READY=$(( $(date +%s) + 300 ))
+  fi
 
   say "queue topic '$TOPIC'"
   # Queued submissions travel through Pub/Sub (see api/dispatch.go). The
@@ -231,6 +244,7 @@ deploy_family() {
   local image="$REPO/runner-$fam:$(hash_of "$dir" runner)"
   build "$image" "$dir" Dockerfile "$(json_get "$cfg" machine_type)" "${args[@]}"
 
+  settle_logs
   say "deploying runner-$fam"
   "${G[@]}" beta run deploy "runner-$fam" --image "$image" --region "$REGION" \
     --sandbox-launcher --execution-environment gen2 \
@@ -240,8 +254,16 @@ deploy_family() {
     --min-instances "$(json_get "$cfg" min_instances 0)" \
     --max-instances "$(json_get "$cfg" max_instances 50)" \
     --labels app=serverless-judge >/dev/null
-  "${G[@]}" run services add-iam-policy-binding "runner-$fam" --region "$REGION" \
-    --member "serviceAccount:$API_SA" --role roles/run.invoker >/dev/null
+  # Cloud Run keeps refusing a caller for about a minute after it has been
+  # granted access (62 to 70 s when measured). Registering the language is
+  # what makes the API route here, so a new grant waits before that.
+  if ! "${G[@]}" run services get-iam-policy "runner-$fam" --region "$REGION" \
+      --format 'value(bindings.members)' 2>/dev/null | grep -q "$API_SA"; then
+    "${G[@]}" run services add-iam-policy-binding "runner-$fam" --region "$REGION" \
+      --member "serviceAccount:$API_SA" --role roles/run.invoker >/dev/null
+    echo "runner-$fam: waiting 2 minutes for the API's access to take effect"
+    sleep 120
+  fi
 
   local url; url="$("${G[@]}" run services describe "runner-$fam" --region "$REGION" --format='value(status.url)')"
   register "$fam" "$url"
@@ -285,6 +307,7 @@ cmd_api() {
   build "$image" . api/Dockerfile ""
   local env="PROJECT_ID=$PROJECT,FIRESTORE_DB=$DB,QUEUE_TOPIC=$TOPIC"
 
+  settle_logs
   say "deploying judge-worker"
   "${G[@]}" run deploy judge-worker --image "$image" --region "$REGION" \
     --no-allow-unauthenticated --service-account "$API_SA" \

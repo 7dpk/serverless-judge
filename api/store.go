@@ -185,29 +185,56 @@ type Language struct {
 // background, so adding a language needs no API redeploy.
 type langCache struct {
 	st      *Store
+	fetch   func(context.Context) ([]Language, error) // nil: read Firestore
 	mu      sync.RWMutex
 	byID    map[int]*Language
 	list    []*Language
 	loaded  time.Time
 	loading bool
+
+	missMu    sync.Mutex
+	rechecked time.Time // last reload forced by an unknown id
 }
 
-const langTTL = 30 * time.Second
+const (
+	langTTL = 30 * time.Second
+	// An unknown id forces a reload, but not more often than this, so
+	// nonsense ids cannot be turned into a stream of registry reads.
+	langRecheck = 2 * time.Second
+)
+
+func (lc *langCache) rows(ctx context.Context) ([]Language, error) {
+	if lc.fetch != nil {
+		return lc.fetch(ctx)
+	}
+	docs, err := lc.st.c.Collection("languages").Documents(ctx).GetAll()
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Language, 0, len(docs))
+	for _, d := range docs {
+		var l Language
+		if d.DataTo(&l) == nil {
+			rows = append(rows, l)
+		}
+	}
+	return rows, nil
+}
 
 func (lc *langCache) load(ctx context.Context) error {
-	docs, err := lc.st.c.Collection("languages").Documents(ctx).GetAll()
+	rows, err := lc.rows(ctx)
 	if err != nil {
 		return err
 	}
 	byID := map[int]*Language{}
 	var list []*Language
-	for _, d := range docs {
-		var l Language
-		if err := d.DataTo(&l); err != nil || l.ID == 0 || l.URL == "" {
+	for i := range rows {
+		l := &rows[i]
+		if l.ID == 0 || l.URL == "" {
 			continue
 		}
-		byID[l.ID] = &l
-		list = append(list, &l)
+		byID[l.ID] = l
+		list = append(list, l)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
 	lc.mu.Lock()
@@ -236,11 +263,43 @@ func (lc *langCache) refreshIfStale() {
 	}()
 }
 
+// get returns the language with this id, or nil. The background refresh
+// only runs while there is traffic: an instance that sat idle still holds
+// the registry as it was, and a language may have been registered a second
+// ago. So a miss is checked against the registry before it is believed.
 func (lc *langCache) get(id int) *Language {
 	lc.refreshIfStale()
+	if l := lc.cached(id); l != nil {
+		return l
+	}
+	lc.recheck()
+	return lc.cached(id)
+}
+
+func (lc *langCache) cached(id int) *Language {
 	lc.mu.RLock()
 	defer lc.mu.RUnlock()
 	return lc.byID[id]
+}
+
+// recheck reloads the registry now, unless it was loaded or rechecked
+// within langRecheck. Concurrent misses wait for one reload.
+func (lc *langCache) recheck() {
+	if lc.fetch == nil && lc.st == nil {
+		return
+	}
+	lc.missMu.Lock()
+	defer lc.missMu.Unlock()
+	lc.mu.RLock()
+	fresh := time.Since(lc.loaded) < langRecheck
+	lc.mu.RUnlock()
+	if fresh || time.Since(lc.rechecked) < langRecheck {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	lc.load(ctx)
+	lc.rechecked = time.Now()
 }
 
 func (lc *langCache) all() []*Language {

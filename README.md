@@ -2,8 +2,16 @@
 
 A Judge0-compatible code execution service on Google Cloud Run. Every
 submission runs in a throwaway [Cloud Run sandbox](https://docs.cloud.google.com/run/docs/code-execution)
-(gVisor, no network, no credentials). Everything scales to zero, so the bill
-is request time only.
+(gVisor, no network, no credentials). With no traffic there are no
+instances: compute is billed per request, and the only standing cost is
+image storage ([under 20 cents a month](#cost)).
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.gif">
+    <img src="docs/how-it-works.gif" width="880" alt="Animation. With no traffic every service is at zero instances and compute billing is off. A submission starts the API and a runner; it runs in its own sandbox, which is destroyed afterwards while the next one is already waiting. A burst is queued through Pub/Sub and the runners scale out. When traffic stops, billing stops and everything returns to zero.">
+  </picture>
+</p>
 
 Ten languages plus two SQL engines: C, C++, Python, JavaScript, TypeScript,
 Java, C#, Go, PHP, Rust, PostgreSQL, MySQL.
@@ -11,7 +19,45 @@ Java, C#, Go, PHP, Rust, PostgreSQL, MySQL.
 Limits are Codeforces style: 2 s of CPU and 256 MB by default, never more
 than 2 s and 512 MB.
 
+## Quick start
+
+You need a Google Cloud project with billing enabled, the
+[gcloud CLI](https://cloud.google.com/sdk/docs/install) and
+[Terraform](https://developer.hashicorp.com/terraform/install) 1.5 or newer.
+
+```bash
+gcloud auth login                         # used for the image builds
+gcloud auth application-default login     # used by Terraform
+
+cd terraform
+terraform init
+terraform apply -var project=<your-project-id>
+```
+
+A first apply takes about 11 minutes, most of it image builds (10 min 57 s
+measured in `us-east1`). When it finishes:
+
+```bash
+terraform output playground               # open this in a browser
+$(terraform output -raw api_key_command)  # the key to paste into it
+```
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/playground-dark.gif">
+    <img src="docs/playground.gif" width="880" alt="Recording of the playground: a Python program, a C++ program and a PostgreSQL query each run and come back Accepted with run time and memory, then Run all checks all twelve languages.">
+  </picture>
+</p>
+
+The recording is a real session against a deployed judge. "Round trip"
+includes the network between the browser and the region.
+
+More on Terraform, and a script that does the same without it, under
+[Deploying](#deploying).
+
 ## How it works
+
+The animation above, as text:
 
 ```
                       wait=true
@@ -52,8 +98,9 @@ Both are served by judge-api itself; nothing is loaded from another site.
 - **`/ui/`** is the playground: pick a language, edit the sample, run it, and
   see the verdict, output, run time and memory. "Check every language" runs
   all twelve samples and compares their output.
-- **`/ui/admin`** needs an admin key (`./deploy.sh key`). It has the
-  analytics dashboard and temporary tokens.
+- **`/ui/admin`** needs an admin key (the `api_key_command` Terraform
+  output, or `./deploy.sh key`). It has the analytics dashboard and
+  temporary tokens.
 
 **Temporary tokens** are for letting someone else try the judge. Create one
 on the admin page with a label, a lifetime (at most 7 days) and a cap on
@@ -91,6 +138,8 @@ last 24 hours to 90 days. It reads `GET /admin/stats?range=24h|7d|30d|90d`.
 - **Logs** of the judge's services go to their own Cloud Logging bucket,
   `judge-logs`, kept for 7 days, and are excluded from the project's default
   30-day bucket. They hold request lines and timings, never code or output.
+  A new routing rule took up to 4 minutes to be applied when measured, so a
+  first deploy creates the services 5 minutes after the rule.
   To read them: `gcloud logging read '<filter>' --bucket judge-logs --location global --view _AllLogs`.
 - **Queued messages** in Pub/Sub are dropped after 30 minutes.
 
@@ -100,8 +149,10 @@ The API follows [Judge0 CE](https://ce.judge0.com): same paths, fields,
 status ids and `X-Auth-Token` header.
 
 ```bash
-export JUDGE_URL=$(./deploy.sh status | awk '/judge-api/ {print $2}')
-export JUDGE_KEY=$(./deploy.sh key)
+export JUDGE_URL=$(terraform -chdir=terraform output -raw url)
+export JUDGE_KEY=$($(terraform -chdir=terraform output -raw api_key_command))
+# or, if you deployed with the script:
+#   JUDGE_URL=$(./deploy.sh status | awk '/judge-api/ {print $2}')  JUDGE_KEY=$(./deploy.sh key)
 
 # Run and wait for the result
 curl -s "$JUDGE_URL/submissions?wait=true" -H "X-Auth-Token: $JUDGE_KEY" -H 'Content-Type: application/json' \
@@ -152,20 +203,106 @@ caller already uses to the `ids` list and redeploy that family.
 
 ## Deploying
 
+There are two ways, and they read the same files: a folder under
+`languages/` is a runner service, its `service.json` sizes it, and each
+`langs/*.json` is a language. Use one of them for a given copy of the judge,
+not both.
+
+### With Terraform
+
+`terraform/` creates everything from an empty project: the APIs, the image
+registry, the images (built by Cloud Build, so only gcloud is needed
+locally), three service accounts, the Firestore database with its expiry
+rules, the Pub/Sub queue, the 7-day log bucket, the twelve Cloud Run
+services and the language registry.
+
+```bash
+cd terraform
+terraform init
+terraform apply -var project=<your-project-id>
+```
+
+Put settings in `terraform.tfvars` (see `terraform.tfvars.example`):
+
+| Variable | Default | |
+|---|---|---|
+| `project` | required | Project to deploy into |
+| `region` | `us-central1` | Region for the services, the registry and the database |
+| `families` | all | Deploy only some folders of `languages/`, for example `["python", "gcc"]` |
+| `max_instances` | from `service.json` | Per-family instance cap, for example `{ gcc = 40 }` |
+| `cpu_quota` | `200` | The regional CPU quota the caps must fit in (see [Capacity](#capacity-and-the-cpu-quota)) |
+| `api_min_instances` | `0` | Keep API instances warm: no cold start, but an idle cost |
+| `submission_ttl_hours` | `144` | How long submissions are kept |
+| `name_prefix` | none | Run a second copy in the same project, for example `"staging-"` |
+| `firestore_location` | the region | For a multi-region database such as `nam5` |
+| `delete_data_on_destroy` | `false` | Let `terraform destroy` delete the database too |
+
+- **Changing things.** Edit a package list, a `service.json` or add a
+  language folder, then `terraform apply` again. Image tags are hashes of
+  the files that go into them, so only what changed is rebuilt and only the
+  services that use it are rolled.
+- **The API key** is generated by a local step and stored in Secret
+  Manager. It is never written to the Terraform state.
+- **Removing it.** `terraform destroy` deletes what it created. The
+  database is left in place unless `delete_data_on_destroy = true`, and the
+  APIs stay enabled. Two things linger after a destroy: Firestore reserves
+  a deleted database's name for about 5 minutes, so wait that long before
+  applying again under the same name; and Cloud Logging keeps a deleted log
+  bucket for 7 days, which the next apply restores and reuses.
+- **If apply stops part way.** Run it again; it continues where it
+  stopped. "Permission denied on secret" or an HTTP 403 right after a
+  deploy means an access grant has not taken effect yet, which can take a
+  few minutes.
+- **Where it runs.** Any region with second-generation Cloud Run should
+  work: the sandbox documentation listed no region limits when read on
+  14 November 2026. It has been deployed and tested in `us-central1`,
+  `us-east1`, `europe-west1` and `asia-south1`. Sandbox support was
+  verified with version 8.11.0 of the `google-beta` provider.
+- **Scale to zero is set explicitly.** Every service has
+  `min_instance_count = 0` and `cpu_idle = true`. The second one matters:
+  without it Terraform deploys "CPU always allocated", which bills for the
+  whole life of every instance.
+
+It runs local steps (the image builds and the key), so the machine running
+`terraform apply` needs gcloud, bash and openssl.
+
+Tested on 14 November 2026 with Terraform 1.5.7 and version 8.11.0 of the
+providers, by deploying separate copies from nothing beside the
+`us-central1` one. The last of them, in `us-east1` on the configuration in
+this repository:
+
+- one `terraform apply`, 103 resources, 10 min 57 s;
+- the live suite (`tests/e2e.py`, 70 checks) started the moment apply
+  returned and passed;
+- a second `terraform plan` showed no changes;
+- none of its log lines reached the default 30-day bucket;
+- `terraform destroy` removed all 103 resources in 74 s.
+
+Earlier copies in `asia-south1` and `europe-west1` covered the rest: a
+burst of 300 submissions all Accepted in 13.8 s, an apply interrupted by a
+dropped connection and continued by running it again, and a destroy
+followed by an apply under the same names (the log bucket was restored
+automatically; the database name was free after 5 minutes).
+
+Not tested: a brand-new project (the APIs were already enabled here), and
+a remote state backend.
+
+### With deploy.sh
+
+The same result with gcloud alone and no state file.
+
 ```bash
 gcloud config set project <project>
 ./deploy.sh all            # infra, every language, the API
 ./deploy.sh lang python    # rebuild and redeploy one family
 ./deploy.sh api            # the API and the worker (one image)
 ./deploy.sh status
+./deploy.sh key
 ```
-
-Image tags are content hashes, so nothing is rebuilt unless its inputs
-changed.
 
 ### Adding packages
 
-Edit the family's package list and run `./deploy.sh lang <family>`.
+Edit the family's package list, then `terraform apply` or `./deploy.sh lang <family>`.
 
 | Family | File |
 |---|---|
@@ -190,8 +327,8 @@ Create `languages/<family>/` with:
   `Manifest` in `runner/proto/proto.go`. `languages/php` is the smallest
   example; `languages/postgres` shows a language that needs a daemon.
 
-Then `./deploy.sh lang <family>`. The API picks the language up within
-30 seconds; it needs no redeploy.
+Then `terraform apply` or `./deploy.sh lang <family>`. The API needs no
+redeploy: it re-reads the registry when it meets an id it does not know.
 
 ## Safety
 
@@ -251,10 +388,10 @@ default ("Total CPU allocation, per project per region" under IAM & Admin >
 Quotas). Every service draws on it, and idle instances keep counting for up
 to 15 minutes after their last request.
 
-So the instance caps must fit inside the quota. `./deploy.sh` checks this and
-refuses to deploy caps that do not fit:
+So the instance caps must fit inside the quota. Both deploy paths check
+this and refuse caps that do not fit:
 
-    runners (sum of max_instances x cpu) + API + worker + 6 for rollouts  <=  QUOTA_VCPU
+    runners (sum of max_instances x cpu) + API + worker + 6 for rollouts  <=  quota
 
 The defaults use all 200: 90 runner instances at 2 vCPU (gcc 20, python 12,
 java 12, node 10, dotnet 8, mysql 8, go 6, postgres 6, php 4, rust 4), 6 API
@@ -263,7 +400,8 @@ instances and 8 worker instances.
 With those caps the measured ceiling is about **135 submissions per second**
 for a mix of all 12 languages. For more, request a higher quota from Google,
 raise `max_instances` in `languages/*/service.json`, and deploy with
-`QUOTA_VCPU=<new quota>`.
+`cpu_quota = <new quota>` (Terraform) or `QUOTA_VCPU=<new quota>`
+(`deploy.sh`).
 
 ### Runner size: 2 vCPU or 1
 
@@ -318,12 +456,28 @@ Internal Error. No submission ever received a wrong pass or fail verdict.
 
 ## Cost
 
-Request-based billing: an instance costs money only while it handles a
-request. A run costs roughly its duration on the runner (2 vCPU, 2 GiB) plus
-the same duration on the API or the worker (1 vCPU, 0.5 GiB, shared by all
-concurrent requests). The 20,000-submission test above cost about $0.67 of
-Cloud Run time, estimated from Cloud Monitoring at list prices. Idle cost is image storage and stored submissions, which expire
-after 6 days (see Data retention).
+**While running.** Request-based billing: an instance costs money only
+while it handles a request. A run costs roughly its duration on the runner
+(2 vCPU, 2 GiB) plus the same duration on the API or the worker (1 vCPU,
+0.5 GiB, shared by all concurrent requests). The 20,000-submission test
+above cost about $0.67 of Cloud Run time, estimated from Cloud Monitoring at
+list prices.
+
+**While idle.** No instances, so no compute. What is left:
+
+| | Idle cost |
+|---|---|
+| Cloud Run, 12 services at zero instances | none |
+| Pub/Sub topic and subscription with nothing queued | none |
+| Image storage in Artifact Registry | 11 to 18 cents a month: 1.6 GB after a first deploy, 2.3 GB once three versions of each image are kept, at $0.10 per GB above the free 0.5 GB |
+| Firestore: analytics counters, and submissions until they expire | a fraction of a cent: about 1.7 KB of counters per hour that has traffic (measured), stored without indexes |
+| Secret Manager, one key | a few cents a month at most |
+| Cloud Logging, 7-day bucket | none: nothing is logged without traffic |
+
+Image sizes are measured; the prices are list prices on 14 November 2026,
+so this is an estimate and not a bill. Setting `min_instances` or
+`api_min_instances` above 0 is what turns idle cost on: those instances
+never stop.
 
 ## Tests
 
@@ -338,6 +492,10 @@ JUDGE_URL=... JUDGE_KEY=... go run tests/loadtest/main.go -n 20000 -duration 2m 
 `tests/loadtest` submits different programs at a steady rate, about 5% of
 them built to fail in a known way, and passes only if every one gets exactly
 the verdict it should. Check the quota before running it at a new rate.
+
+`docs/render.js` regenerates the two animations in this README:
+`how-it-works.gif` from `docs/how-it-works.html`, and `playground.gif` by
+recording a session against a deployed judge.
 
 `probe/` holds a debug shell that can be deployed on top of any runner image
 (`probe/on.sh <family>`). It executes arbitrary commands, so it is

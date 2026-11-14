@@ -18,3 +18,11 @@ __pycache__/
 *.key
 *.pem
 credentials*.json
+
+# Terraform: state can hold sensitive values, and tfvars name your project.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log

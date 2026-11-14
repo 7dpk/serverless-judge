@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and edit. Only project is required.
+project = "my-project-id"
+
+# region = "us-central1"
+
+# Deploy only some languages (folders under languages/):
+# families = ["python", "gcc", "node"]
+
+# Raise a family's instance cap without editing its service.json:
+# max_instances = { gcc = 40 }
+# cpu_quota     = 400        # after Google has raised the regional CPU quota
+
+# Run a second copy in the same project:
+# name_prefix = "staging-"
