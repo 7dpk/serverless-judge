@@ -1,0 +1,13 @@
+{
+  "name": "mysql",
+  "title": "MySQL (8.4)",
+  "ids": [202],
+  "source_file": "main.sql",
+  "wall_clock": true,
+  "no_memory_limit": true,
+  "warmup": {"cmd": ["/opt/lang/start.sh"], "daemon": true},
+  "prepare": {"cmd": ["/opt/lang/start.sh"]},
+  "before_run": {"cmd": ["/opt/lang/setup.sh"]},
+  "run": {"cmd": ["/opt/lang/run.sh"]},
+  "after_run": {"cmd": ["/opt/lang/cleanup.sh"]}
+}

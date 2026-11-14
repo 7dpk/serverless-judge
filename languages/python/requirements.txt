@@ -1,0 +1,2 @@
+# Python packages available to submissions, one per line (pip format).
+numpy

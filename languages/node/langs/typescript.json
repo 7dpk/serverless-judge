@@ -1,0 +1,9 @@
+{
+  "name": "typescript",
+  "title": "TypeScript (7.0, Node.js 24)",
+  "ids": [74, 101],
+  "source_file": "main.ts",
+  "warmup": {"cmd": ["sh", "-c", "echo 'const n: number = 1; console.log(n);' > main.ts && /opt/lang/tsc.sh && node main.js"]},
+  "compile": {"cmd": ["/opt/lang/tsc.sh", "{options}"]},
+  "run": {"cmd": ["node", "main.js", "{args}"]}
+}

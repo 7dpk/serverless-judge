@@ -1,0 +1,4 @@
+{
+  "name": "judge/php-packages",
+  "description": "Composer packages available to PHP submissions. Add a \"require\" block, for example: \"require\": {\"brick/math\": \"^0.12\"}"
+}

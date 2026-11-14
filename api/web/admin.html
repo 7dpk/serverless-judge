@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Judge admin</title>
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+<header class="top">
+  <h1>serverless-judge</h1>
+  <nav>
+    <a href="/ui/">Playground</a>
+    <a href="/ui/admin" aria-current="page">Admin</a>
+  </nav>
+  <div class="who">
+    <span id="who"></span>
+    <button class="small" id="signout" hidden>Change key</button>
+  </div>
+</header>
+
+<main>
+  <section class="card" id="gate" hidden>
+    <h2>Enter an admin key</h2>
+    <p class="sub">Analytics and token management need an admin key. It is kept in this browser only.</p>
+    <div class="row">
+      <div><input id="token" type="password" autocomplete="off" spellcheck="false" aria-label="Admin key"></div>
+      <div><button class="primary" id="savetoken">Continue</button></div>
+    </div>
+    <p class="error" id="gateerr" role="alert"></p>
+  </section>
+
+  <div id="dash" hidden>
+    <!-- One filter row scopes every number and chart below it. -->
+    <div class="filters">
+      <div>
+        <label for="range">Period</label>
+        <select id="range">
+          <option value="24h" selected>Last 24 hours</option>
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="90d">Last 90 days</option>
+        </select>
+      </div>
+      <div>
+        <label for="flang">Language</label>
+        <select id="flang"><option value="">All languages</option></select>
+      </div>
+      <div><button id="refresh">Refresh</button></div>
+    </div>
+  </div>
+
+  <div class="tiles" id="tiles" hidden></div>
+
+  <div class="two" id="charts" hidden>
+    <figure class="card">
+      <div class="head">
+        <h2 id="volTitle">Submissions per hour</h2>
+        <div class="right"><button class="small" data-table="vol">Show as table</button></div>
+      </div>
+      <div class="chart" id="vol"></div>
+      <div class="scroll" id="volTable" hidden></div>
+    </figure>
+    <figure class="card">
+      <div class="head">
+        <h2>Time from submit to result</h2>
+        <div class="right"><button class="small" data-table="lat">Show as table</button></div>
+      </div>
+      <p class="legend"><span><i class="key k1"></i>Median</span><span><i class="key k2"></i>90th percentile</span></p>
+      <div class="chart" id="lat"></div>
+      <div class="scroll" id="latTable" hidden></div>
+    </figure>
+  </div>
+
+  <div class="two wide-right" id="tables" hidden>
+    <section class="card">
+      <h2>Verdicts</h2>
+      <p class="sub">How submissions in this period ended.</p>
+      <div id="verdicts"></div>
+    </section>
+    <section class="card">
+      <h2>By language</h2>
+      <p class="sub">Times are from submit to result. Percentiles are read off a histogram, so they are approximate.</p>
+      <div class="scroll" id="bylang"></div>
+    </section>
+  </div>
+
+  <section class="card" id="tokens" hidden>
+    <div class="head">
+      <h2>Temporary tokens</h2>
+      <p class="sub">Give someone a link to the playground that stops working on its own.</p>
+    </div>
+    <div class="row">
+      <div>
+        <label for="tlabel">Who it is for</label>
+        <input id="tlabel" maxlength="80" placeholder="e.g. QA team">
+      </div>
+      <div>
+        <label for="tttl">Valid for</label>
+        <select id="tttl">
+          <option value="1">1 hour</option>
+          <option value="24" selected>24 hours</option>
+          <option value="72">3 days</option>
+          <option value="168">7 days</option>
+        </select>
+      </div>
+      <div>
+        <label for="tmax">Submissions allowed</label>
+        <input id="tmax" type="number" min="1" max="100000" value="500">
+      </div>
+      <div><button class="primary" id="tcreate">Create token</button></div>
+    </div>
+    <p class="error" id="terr" role="alert"></p>
+    <div class="newtoken" id="tnew" hidden>
+      <strong>Copy it now. It is not shown again.</strong>
+      <div>
+        <label for="tlink">Link to share</label>
+        <div class="copyrow"><input id="tlink" readonly><button class="small" data-copy="tlink">Copy</button></div>
+      </div>
+      <div>
+        <label for="tvalue">Token, for the X-Auth-Token header</label>
+        <div class="copyrow"><input id="tvalue" readonly><button class="small" data-copy="tvalue">Copy</button></div>
+      </div>
+    </div>
+    <div class="scroll" id="tlist"></div>
+  </section>
+</main>
+<script src="/ui/admin.js"></script>
+</body>
+</html>

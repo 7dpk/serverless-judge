@@ -1,0 +1,19 @@
+# Generic image build. Layers are reused from the previous build of the same
+# image, so changing only the judge binary rebuilds just the last layers.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    env: ["DOCKER_BUILDKIT=1"]
+    args:
+      - -c
+      - |
+        set -e
+        docker pull "${_CACHE}" || true
+        docker build -f "${_DOCKERFILE}" --cache-from "${_CACHE}" \
+          --build-arg BUILDKIT_INLINE_CACHE=1 ${_BUILD_ARGS} \
+          -t "${_IMAGE}" -t "${_CACHE}" .
+images: ["${_IMAGE}", "${_CACHE}"]
+substitutions:
+  _DOCKERFILE: Dockerfile
+  _BUILD_ARGS: ""
+timeout: 3600s

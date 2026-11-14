@@ -1,0 +1,9 @@
+{
+  "name": "judge-node-packages",
+  "private": true,
+  "description": "npm packages available to JavaScript and TypeScript submissions. Add to dependencies.",
+  "dependencies": {
+    "typescript": "^7.0.0",
+    "@types/node": "^24.0.0"
+  }
+}

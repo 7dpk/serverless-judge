@@ -1,0 +1,2 @@
+# Go modules available to submissions, one per line: module@version
+# Example: golang.org/x/exp@latest

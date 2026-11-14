@@ -1,0 +1,8 @@
+{
+  "name": "php",
+  "title": "PHP (8.4)",
+  "ids": [68, 98],
+  "source_file": "main.php",
+  "warmup": {"cmd": ["php", "-r", "echo 1;"]},
+  "run": {"cmd": ["php", "main.php", "{args}"]}
+}

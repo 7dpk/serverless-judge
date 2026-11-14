@@ -1,0 +1,9 @@
+{
+  "name": "java",
+  "title": "Java (OpenJDK 25)",
+  "ids": [62, 91],
+  "source_file": "Main.java",
+  "warmup": {"cmd": ["sh", "-c", "echo 'public class Main { public static void main(String[] a) { System.out.println(1); } }' > Main.java && javac -J-XX:+UseSerialGC -J-XX:TieredStopAtLevel=1 -J-XX:AOTCache=/opt/lang/javac.aot -J-Xlog:disable -d . Main.java && java -XX:+UseSerialGC -cp . Main"]},
+  "compile": {"cmd": ["javac", "-J-XX:+UseSerialGC", "-J-XX:TieredStopAtLevel=1", "-J-XX:AOTCache=/opt/lang/javac.aot", "-J-Xlog:disable", "-encoding", "UTF-8", "-cp", "/opt/lang/lib/*", "-d", ".", "{options}", "Main.java"]},
+  "run": {"cmd": ["java", "-XX:+UseSerialGC", "-Xss64m", "-Xmx{memory_mb}m", "-cp", ".:/opt/lang/lib/*", "Main", "{args}"]}
+}

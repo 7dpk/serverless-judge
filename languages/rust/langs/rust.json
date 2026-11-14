@@ -1,0 +1,10 @@
+{
+  "name": "rust",
+  "title": "Rust (stable, edition 2024)",
+  "ids": [73, 108],
+  "source_file": "main.rs",
+  "stack_kb": 262144,
+  "warmup": {"cmd": ["sh", "-c", "echo 'fn main() { println!(\"1\"); }' > main.rs && rustc -O --edition 2024 -C debuginfo=0 -o main main.rs && ./main"]},
+  "compile": {"cmd": ["rustc", "-O", "--edition", "2024", "-C", "debuginfo=0", "@/opt/lang/externs.rsp", "-o", "main", "{options}", "main.rs"]},
+  "run": {"cmd": ["./main", "{args}"]}
+}

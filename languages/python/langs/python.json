@@ -1,0 +1,9 @@
+{
+  "name": "python",
+  "title": "Python (3.13)",
+  "ids": [71, 100],
+  "source_file": "main.py",
+  "env": {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"},
+  "warmup": {"cmd": ["python3", "-c", "import sys, math, collections, itertools, heapq, bisect, functools, re, json, random, string, decimal, fractions"]},
+  "run": {"cmd": ["python3", "main.py", "{args}"]}
+}

@@ -1,0 +1,20 @@
+# Build output
+/runner/judge
+/runner/jexec/jexec
+/api/api
+*.test
+*.out
+
+# Local noise
+.DS_Store
+*.log
+.env
+.env.*
+node_modules/
+__pycache__/
+*.pyc
+
+# Never commit keys. The API key lives in Secret Manager.
+*.key
+*.pem
+credentials*.json

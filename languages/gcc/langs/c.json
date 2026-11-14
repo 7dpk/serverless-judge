@@ -1,0 +1,10 @@
+{
+  "name": "c",
+  "title": "C (GCC 14, C17)",
+  "ids": [50, 103],
+  "source_file": "main.c",
+  "stack_kb": 262144,
+  "warmup": {"cmd": ["sh", "-c", "echo 'int main(){return 0;}' > w.c && gcc -O2 -std=gnu17 -o w w.c -lm && ./w"]},
+  "compile": {"cmd": ["gcc", "-O2", "-std=gnu17", "-o", "main", "{options}", "main.c", "-lm"]},
+  "run": {"cmd": ["./main", "{args}"]}
+}

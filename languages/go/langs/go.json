@@ -1,0 +1,9 @@
+{
+  "name": "go",
+  "title": "Go (1.26)",
+  "ids": [60, 107],
+  "source_file": "main.go",
+  "warmup": {"cmd": ["sh", "-c", "printf 'package main\\nimport \"fmt\"\\nfunc main() { fmt.Println(1) }\\n' > main.go && /opt/lang/compile.sh && ./main"]},
+  "compile": {"cmd": ["/opt/lang/compile.sh", "{options}"]},
+  "run": {"cmd": ["./main", "{args}"]}
+}

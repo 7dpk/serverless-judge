@@ -1,0 +1,10 @@
+{
+  "name": "cpp",
+  "title": "C++ (GCC 14, C++20)",
+  "ids": [54, 105],
+  "source_file": "main.cpp",
+  "stack_kb": 262144,
+  "warmup": {"cmd": ["sh", "-c", "printf '#include <bits/stdc++.h>\\nint main(){return 0;}\\n' > w.cpp && g++ -O2 -std=gnu++20 -I/opt/pch -o w w.cpp && ./w"]},
+  "compile": {"cmd": ["g++", "-O2", "-std=gnu++20", "-I/opt/pch", "-o", "main", "{options}", "main.cpp"]},
+  "run": {"cmd": ["./main", "{args}"]}
+}

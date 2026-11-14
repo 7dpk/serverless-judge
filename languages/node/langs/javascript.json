@@ -1,0 +1,8 @@
+{
+  "name": "javascript",
+  "title": "JavaScript (Node.js 24)",
+  "ids": [63, 102],
+  "source_file": "main.js",
+  "warmup": {"cmd": ["node", "-e", "require('readline'); require('fs'); require('util')"]},
+  "run": {"cmd": ["node", "main.js", "{args}"]}
+}
