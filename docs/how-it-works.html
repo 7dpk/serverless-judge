@@ -23,14 +23,54 @@ svg { display: block; font-family: -apple-system, system-ui, "Segoe UI", Helveti
 <body>
 <svg id="s" width="960" height="540" viewBox="0 0 960 540"></svg>
 <script>
-// A deterministic animation: draw(t) renders the frame at t seconds. The
-// capture script calls it once per frame; opening the file plays it live.
+// Five slow steps, one idea each. draw(t) renders the frame at t seconds, so
+// docs/render.js can make the GIF frame by frame and take one still per step.
+//
+//   how-it-works.html            plays it
+//   how-it-works.html?step=3     the still for step 3
+//   ...&theme=dark               dark colours
 const q = new URLSearchParams(location.search);
 if (q.get('theme') === 'dark') document.documentElement.dataset.theme = 'dark';
 
-const SC = { idle: [0, 2.0], wait: [2.0, 8.0], box: [8.0, 12.6], burst: [12.6, 20.2], zero: [20.2, 23.6] };
-const DURATION = 23.6;
+// Each step: when it starts and ends, the moment used for its still, and the
+// two lines under the picture.
+const STEPS = [
+  { from: 0, to: 5, still: 4,
+    title: 'Nobody is submitting',
+    sub: 'Nothing is running, so there is no compute to pay for.' },
+  { from: 5, to: 12, still: 11,
+    title: 'A submission arrives',
+    sub: 'The API and the runner for that language start on demand.' },
+  { from: 12, to: 20.5, still: 15.4,
+    title: 'It runs in its own sandbox',
+    sub: 'No network, 2 s of CPU, 256 MB. One run, then the sandbox is destroyed.' },
+  { from: 20.5, to: 32, still: 25,
+    title: 'A burst is queued',
+    sub: 'Every submission gets a token at once. Runners scale out and work through the queue.' },
+  { from: 32, to: 38, still: 37,
+    title: 'Traffic stops',
+    sub: 'Billing stopped with the last request. Idle instances shut down within 15 minutes.' },
+];
+const DURATION = STEPS[STEPS.length - 1].to;
 window.DURATION = DURATION;
+window.STILLS = STEPS.map(s => s.still);
+
+// When things happen, in seconds.
+const T = {
+  in0: 5.8, apiUp: 7.0, runnerUp: 8.4,           // step 2: the request travels in
+  box0: 12.6, run0: 13.4, run1: 16.4,            // step 3: sandbox created, code runs
+  gone0: 17.6, back0: 17.2, back1: 18.2, out1: 19.1,
+  runnerDown: 33.2, apiDown: 34.2,               // step 5
+};
+
+// Step 4: six submissions, up to four runner instances.
+const N = 6;
+const DISPATCH = [23.2, 23.7, 24.2, 24.7, 25.8, 26.3];
+const J = DISPATCH.map((d, i) => {
+  const tin = 21.2 + 0.4 * i;
+  return { i, tin, api: tin + 0.8, q: tin + 1.5, d, tile: i % 4, run0: d + 0.7, run1: d + 2.5 };
+});
+const LAST = Math.max(...J.map(j => j.run1));
 
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
 const prog = (t, a, b) => clamp((t - a) / (b - a));
@@ -56,311 +96,209 @@ function at(path, p) {
 }
 const rev = path => pathOf(path.pts.slice().reverse());
 
-// --- geometry ---------------------------------------------------------------
+// --- where things are ---------------------------------------------------------
 const B = {
-  client: { x: 24, y: 168, w: 112, h: 64, title: 'client', sub: 'your app, or /ui/' },
-  api: { x: 196, y: 160, w: 168, h: 80, title: 'judge-api', sub: 'public: checks, stores' },
-  store: { x: 196, y: 348, w: 168, h: 64, title: 'Firestore', sub: 'kept 6 days, then deleted' },
-  queue: { x: 420, y: 348, w: 124, h: 64, title: 'Pub/Sub', sub: 'queue' },
-  worker: { x: 604, y: 348, w: 160, h: 64, title: 'judge-worker', sub: 'private' },
-  runner: { x: 604, y: 92, w: 332, h: 224, title: 'runner-python', sub: 'one service per toolchain, 10 in all' },
+  client: { x: 40, y: 196, w: 150, h: 88, title: 'Your app', sub: 'sends the code' },
+  api: { x: 286, y: 196, w: 170, h: 88, title: 'API', sub: 'checks key and limits' },
+  queue: { x: 286, y: 372, w: 170, h: 76, title: 'Queue', sub: 'Pub/Sub and a worker' },
+  runner: { x: 560, y: 112, w: 360, h: 256, title: 'Runner', sub: 'one service per language' },
 };
-const LANE = 200;
+const MID = 240;
 const P = {
-  in: pathOf([[136, LANE], [196, LANE]]),
-  top: pathOf([[364, LANE], [604, LANE]]),
-  store: pathOf([[280, 240], [280, 348]]),
-  queue: pathOf([[364, 226], [482, 226], [482, 348]]),
-  push: pathOf([[544, 380], [604, 380]]),
-  run: pathOf([[634, 348], [634, 316]]),
-  verdict: pathOf([[684, 412], [684, 438], [280, 438], [280, 412]]),
+  in: pathOf([[190, MID], [286, MID]]),
+  top: pathOf([[456, MID], [560, MID]]),
+  down: pathOf([[371, 284], [371, 372]]),
+  up: pathOf([[456, 410], [508, 410], [508, 316], [560, 316]]),
 };
-const SLOT = { A: { x: 620, y: 150, w: 146, h: 118 }, B: { x: 774, y: 150, w: 146, h: 118 } };
-const TILE = [0, 1, 2, 3].map(i => ({ x: 620 + (i % 2) * 154, y: 150 + Math.floor(i / 2) * 62, w: 146, h: 54 }));
+const SLOT = { x: 584, y: 190, w: 312, h: 150 };
+const TILE = [0, 1, 2, 3].map(i => ({ x: 584 + (i % 2) * 160, y: 190 + Math.floor(i / 2) * 78, w: 152, h: 70 }));
 
-// --- the script -------------------------------------------------------------
-// Sandbox slots in the "wait" and "box" scenes: [from, to, state].
-const SLOTS = {
-  A: [[3.9, 4.5, 'creating'], [4.5, 5.8, 'running'], [5.8, 6.1, 'done'], [6.1, 6.7, 'destroyed'],
-      [6.7, 9.3, 'none'], [9.3, 10.0, 'creating'], [10.0, 10.9, 'spare'], [10.9, 11.7, 'running'],
-      [11.7, 11.9, 'done'], [11.9, 12.5, 'destroyed'], [12.5, 99, 'none']],
-  B: [[3.9, 4.7, 'none'], [4.7, 5.4, 'creating'], [5.4, 9.1, 'spare'], [9.1, 10.1, 'running'],
-      [10.1, 10.3, 'done'], [10.3, 10.9, 'destroyed'], [10.9, 11.1, 'none'], [11.1, 11.7, 'creating'],
-      [11.7, 99, 'spare']],
-};
-function slotAt(name, t) {
-  for (const [a, b, s] of SLOTS[name]) if (within(t, a, b)) return { state: s, p: prog(t, a, b) };
-  return { state: 'none', p: 0 };
-}
-
-// The burst: eight submissions, four instances.
-const N = 8;
-const J = [];
-{
-  const dispatch = [14.0, 14.3, 14.6, 14.9, 15.6, 15.9, 16.2, 16.5];
-  for (let i = 0; i < N; i++) {
-    const tin = 12.8 + 0.2 * i;
-    J.push({ i, tin, api: tin + 0.45, q: tin + 1.15, d: dispatch[i], tile: i % 4,
-             run0: dispatch[i] + 0.55, run1: dispatch[i] + 1.55, stored: dispatch[i] + 2.5 });
-  }
-}
-const POLL = { out: [19.0, 19.4], read: [19.3, 19.6], back: [19.6, 19.95] };
-
-function billing(t) {
-  return within(t, 2.45, 7.3) || within(t, 8.4, 12.5) || within(t, 12.8, 19.95);
-}
-function scene(t) { for (const k in SC) if (within(t, SC[k][0], SC[k][1])) return k; return 'zero'; }
-
-const CAPTION = {
-  idle: ['Idle: every service is at zero instances.', 'No servers are kept warm, and no compute is billed.'],
-  wait: ['A submission arrives and the services start on demand.', 'With wait=true the API runs it in a sandbox and answers in the same request.'],
-  box: ['One sandbox per submission, destroyed afterwards.', 'gVisor isolation, no network, no credentials. The next sandbox is created while this one runs.'],
-  burst: ['A burst is queued: tokens come back at once.', 'Pub/Sub holds the backlog, the worker feeds runners as they free up, and instances scale out.'],
-  zero: ['Traffic stops, and billing stops with the last request.', 'Idle instances shut down within 15 minutes. Back to zero.'],
-};
-
-// --- drawing ----------------------------------------------------------------
+// --- drawing ------------------------------------------------------------------
 let out = [];
 const put = s => out.push(s);
 
 function text(x, y, s, o = {}) {
-  put(`<text x="${x}" y="${y}" font-size="${o.size || 12}" font-weight="${o.weight || 400}" fill="${o.fill || 'var(--ink2)'}" text-anchor="${o.anchor || 'start'}"${o.opacity != null ? ` opacity="${o.opacity}"` : ''}>${esc(s)}</text>`);
+  put(`<text x="${x}" y="${y}" font-size="${o.size || 13}" font-weight="${o.weight || 400}" fill="${o.fill || 'var(--ink2)'}" text-anchor="${o.anchor || 'start'}"${o.opacity != null ? ` opacity="${o.opacity}"` : ''}>${esc(s)}</text>`);
 }
 function pill(xRight, yMid, label, on) {
-  const w = label.length * 6.6 + 18, h = 20;
-  put(`<rect x="${xRight - w}" y="${yMid - h / 2}" width="${w}" height="${h}" rx="10" fill="${on ? 'var(--blue)' : 'var(--page)'}" stroke="${on ? 'var(--blue)' : 'var(--axis)'}"/>`);
-  text(xRight - w / 2, yMid + 4, label, { size: 12, weight: 600, anchor: 'middle', fill: on ? '#ffffff' : 'var(--muted)' });
+  const w = label.length * 7.2 + 20, h = 22;
+  put(`<rect x="${xRight - w}" y="${yMid - h / 2}" width="${w}" height="${h}" rx="11" fill="${on ? 'var(--blue)' : 'var(--page)'}" stroke="${on ? 'var(--blue)' : 'var(--axis)'}"/>`);
+  text(xRight - w / 2, yMid + 4.5, label, { size: 13, weight: 600, anchor: 'middle', fill: on ? '#ffffff' : 'var(--muted)' });
 }
-function service(b, awake, count, o = {}) {
-  put(`<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10" fill="${awake ? 'var(--surface)' : 'var(--page)'}" stroke="${awake ? 'var(--blue)' : 'var(--axis)'}" stroke-width="${awake ? 1.75 : 1.25}"${awake ? '' : ' stroke-dasharray="5 4"'}/>`);
-  text(b.x + 14, b.y + 28, b.title, { size: 15, weight: 650, fill: awake ? 'var(--ink)' : 'var(--muted)' });
-  text(b.x + 14, b.y + 47, o.sub || b.sub, { size: 12, fill: awake ? 'var(--ink2)' : 'var(--muted)' });
-  if (count != null) pill(b.x + b.w - 10, b.y, count === 1 ? '1 instance' : `${count} instances`, count > 0);
+const instances = n => (n === 1 ? '1 instance' : `${n} instances`);
+function box(b, awake, o = {}) {
+  put(`<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="12" fill="${awake ? 'var(--surface)' : 'var(--page)'}" stroke="${awake ? (o.plain ? 'var(--ink2)' : 'var(--blue)') : 'var(--axis)'}" stroke-width="${awake ? 2 : 1.25}"${awake ? '' : ' stroke-dasharray="6 5"'}/>`);
+  text(b.x + 16, b.y + 34, b.title, { size: 18, weight: 650, fill: awake ? 'var(--ink)' : 'var(--muted)' });
+  if (o.sub !== null) text(b.x + 16, b.y + 56, o.sub || b.sub, { size: 13, fill: awake ? 'var(--ink2)' : 'var(--muted)' });
+  if (o.count != null) pill(b.x + b.w - 12, b.y, instances(o.count), o.count > 0);
 }
-function managed(b, sub) {
-  put(`<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10" fill="var(--surface)" stroke="var(--axis)" stroke-width="1.25"/>`);
-  text(b.x + 14, b.y + 28, b.title, { size: 15, weight: 650, fill: 'var(--ink)' });
-  if (sub) text(b.x + 14, b.y + 47, sub, { size: 12 });
-}
-function edge(path, on, o = {}) {
-  const c = on ? 'var(--ink2)' : 'var(--faint)';
-  const m = on ? 'url(#arrOn)' : 'url(#arrOff)';
+function edge(path, on) {
   const d = path.pts.map((p, i) => (i ? 'L' : 'M') + p[0] + ' ' + p[1]).join(' ');
-  put(`<path d="${d}" fill="none" stroke="${c}" stroke-width="1.5" marker-end="${m}"${o.both ? ` marker-start="${m}"` : ''}/>`);
-  if (o.label) text(o.lx, o.ly, o.label, { size: 12, anchor: o.anchor || 'middle', fill: on ? 'var(--ink2)' : 'var(--muted)', opacity: on ? 1 : 0.7 });
+  put(`<path d="${d}" fill="none" stroke="${on ? 'var(--ink2)' : 'var(--faint)'}" stroke-width="1.75" marker-end="url(#${on ? 'arrOn' : 'arrOff'})"/>`);
 }
-function dot(pos, color, r = 6, dy = 0) {
-  put(`<circle cx="${pos[0].toFixed(1)}" cy="${(pos[1] + dy).toFixed(1)}" r="${r}" fill="var(--${color})" stroke="var(--page)" stroke-width="2"/>`);
+function dot(pos, color, r = 8) {
+  put(`<circle cx="${pos[0].toFixed(1)}" cy="${pos[1].toFixed(1)}" r="${r}" fill="var(--${color})" stroke="var(--page)" stroke-width="2.5"/>`);
 }
-function travel(t, path, a, b, color, o = {}) {
-  if (!within(t, a, b)) return;
-  dot(at(path, ease(prog(t, a, b))), color, o.r || 6, o.dy || 0);
+function travel(t, path, a, b, color) {
+  if (within(t, a, b)) dot(at(path, ease(prog(t, a, b))), color);
 }
 function check(cx, cy, r) {
   put(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="var(--green)"/>`);
-  put(`<path d="M${cx - r * 0.45} ${cy + r * 0.05} l${r * 0.3} ${r * 0.32} l${r * 0.62} ${-r * 0.7}" fill="none" stroke="#ffffff" stroke-width="${Math.max(1.6, r * 0.2)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+  put(`<path d="M${cx - r * 0.45} ${cy + r * 0.05} l${r * 0.3} ${r * 0.32} l${r * 0.62} ${-r * 0.7}" fill="none" stroke="#ffffff" stroke-width="${Math.max(1.8, r * 0.2)}" stroke-linecap="round" stroke-linejoin="round"/>`);
+}
+function chip(b, label, good) {
+  const y = b.y + b.h + 12;
+  put(`<rect x="${b.x}" y="${y}" width="${b.w}" height="32" rx="16" fill="${good ? 'var(--greenwash)' : 'var(--bluewash)'}" stroke="${good ? 'var(--green)' : 'var(--blue)'}" stroke-width="1.5"/>`);
+  if (good) check(b.x + 20, y + 16, 9);
+  text(b.x + (good ? 36 : b.w / 2), y + 21, label, { size: 14, weight: 600, anchor: good ? 'start' : 'middle', fill: 'var(--ink)' });
+}
+function code(cx, cy, stroke) {
+  put(`<rect x="${cx - 56}" y="${cy - 17}" width="112" height="34" rx="8" fill="var(--surface)" stroke="${stroke}" stroke-width="1.5"/>`);
+  text(cx, cy + 5, 'your code', { size: 14, weight: 600, anchor: 'middle', fill: 'var(--ink)' });
 }
 
-function slot(g, st) {
-  const { state, p } = st;
-  if (state === 'none') {
-    put(`<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="8" fill="none" stroke="var(--faint)" stroke-dasharray="3 5"/>`);
-    return;
-  }
-  const cx = g.x + g.w / 2;
-  if (state === 'destroyed') {
-    const o = 1 - ease(p);
-    put(`<g opacity="${o.toFixed(2)}">`);
-    put(`<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="8" fill="none" stroke="var(--muted)" stroke-dasharray="3 5"/>`);
-    put(`<path d="M${cx - 13} ${g.y + 44} l26 26 M${cx + 13} ${g.y + 44} l-26 26" stroke="var(--muted)" stroke-width="2.5" stroke-linecap="round"/>`);
-    text(cx, g.y + 96, 'destroyed', { size: 13, weight: 600, anchor: 'middle', fill: 'var(--muted)' });
-    put('</g>');
-    return;
-  }
-  const running = state === 'running', done = state === 'done', creating = state === 'creating';
-  const stroke = running ? 'var(--orange)' : done ? 'var(--green)' : 'var(--ink2)';
-  put(`<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="8" fill="${running ? 'var(--orangewash)' : done ? 'var(--greenwash)' : 'var(--surface)'}" stroke="${stroke}" stroke-width="${running || done ? 1.75 : 1.25}" stroke-dasharray="${running || done ? 'none' : '5 4'}"${creating ? ` opacity="${(0.35 + 0.65 * ease(p)).toFixed(2)}"` : ''}/>`);
-  text(g.x + 10, g.y + 19, 'sandbox', { size: 12, weight: 600, fill: running ? 'var(--orange)' : done ? 'var(--green)' : 'var(--ink2)' });
-  if (creating) {
-    text(cx, g.y + 66, 'starting', { size: 13, anchor: 'middle', fill: 'var(--muted)' });
-  } else if (state === 'spare') {
-    text(cx, g.y + 62, 'ready', { size: 14, weight: 600, anchor: 'middle', fill: 'var(--ink)' });
-    text(cx, g.y + 81, 'waiting for the next run', { size: 11, anchor: 'middle', fill: 'var(--muted)' });
-  } else if (running) {
-    put(`<rect x="${g.x + 14}" y="${g.y + 32}" width="${g.w - 28}" height="30" rx="6" fill="var(--surface)" stroke="var(--orange)"/>`);
-    text(cx, g.y + 52, 'your code', { size: 13, weight: 600, anchor: 'middle', fill: 'var(--ink)' });
-    put(`<rect x="${g.x + 14}" y="${g.y + 76}" width="${g.w - 28}" height="6" rx="3" fill="var(--faint)"/>`);
-    put(`<rect x="${g.x + 14}" y="${g.y + 76}" width="${((g.w - 28) * p).toFixed(1)}" height="6" rx="3" fill="var(--orange)"/>`);
-    text(cx, g.y + 103, 'compile, run, measure', { size: 11, anchor: 'middle' });
-  } else if (done) {
-    check(cx, g.y + 58, 15);
-    text(cx, g.y + 96, 'verdict', { size: 13, weight: 600, anchor: 'middle', fill: 'var(--ink)' });
-  }
-}
-
-function tile(g, st) {
-  // st: 'off' | 'starting' | 'idle' | 'running' (with p)
-  if (st.state === 'off') {
-    put(`<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="8" fill="none" stroke="var(--faint)" stroke-dasharray="3 5"/>`);
-    return;
-  }
-  const run = st.state === 'running';
-  put(`<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="8" fill="${run ? 'var(--orangewash)' : 'var(--surface)'}" stroke="${run ? 'var(--orange)' : 'var(--ink2)'}" stroke-width="${run ? 1.75 : 1.25}" stroke-dasharray="${run ? 'none' : '5 4'}"/>`);
-  text(g.x + 10, g.y + 20, `instance ${st.n}`, { size: 12, weight: 600, fill: run ? 'var(--orange)' : 'var(--ink2)' });
-  if (run) {
-    text(g.x + g.w - 10, g.y + 20, 'sandbox', { size: 11, anchor: 'end', fill: 'var(--ink2)' });
-    put(`<rect x="${g.x + 10}" y="${g.y + 34}" width="${g.w - 20}" height="6" rx="3" fill="var(--faint)"/>`);
-    put(`<rect x="${g.x + 10}" y="${g.y + 34}" width="${((g.w - 20) * st.p).toFixed(1)}" height="6" rx="3" fill="var(--orange)"/>`);
+// Steps 2 and 3: the one sandbox.
+function sandbox(t) {
+  const g = SLOT, cx = g.x + g.w / 2;
+  const frame = (stroke, fill, dash, opacity = 1) =>
+    put(`<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="10" fill="${fill}" stroke="${stroke}" stroke-width="${dash ? 1.25 : 2}"${dash ? ' stroke-dasharray="5 5"' : ''} opacity="${opacity.toFixed(2)}"/>`);
+  if (t < T.runnerUp) {
+    text(cx, g.y + 80, 'nothing running', { size: 14, anchor: 'middle', fill: 'var(--muted)' });
+  } else if (t < T.box0) {
+    frame('var(--faint)', 'none', true);
+    code(cx, g.y + 62, 'var(--blue)');
+    text(cx, g.y + 108, 'received', { size: 13, anchor: 'middle', fill: 'var(--muted)' });
+  } else if (t < T.run0) {
+    frame('var(--ink2)', 'var(--surface)', false, 0.3 + 0.7 * ease(prog(t, T.box0, T.run0)));
+    text(g.x + 14, g.y + 24, 'sandbox', { size: 13, weight: 650, fill: 'var(--ink2)' });
+    code(cx, g.y + 62, 'var(--blue)');
+    text(cx, g.y + 108, 'creating a sandbox', { size: 13, anchor: 'middle', fill: 'var(--muted)' });
+  } else if (t < T.run1) {
+    frame('var(--orange)', 'var(--orangewash)', false);
+    text(g.x + 14, g.y + 24, 'sandbox', { size: 13, weight: 650, fill: 'var(--orange)' });
+    code(cx, g.y + 62, 'var(--orange)');
+    put(`<rect x="${g.x + 40}" y="${g.y + 96}" width="${g.w - 80}" height="8" rx="4" fill="var(--faint)"/>`);
+    put(`<rect x="${g.x + 40}" y="${g.y + 96}" width="${((g.w - 80) * prog(t, T.run0, T.run1)).toFixed(1)}" height="8" rx="4" fill="var(--orange)"/>`);
+    text(cx, g.y + 130, 'compile, run, measure', { size: 13, anchor: 'middle' });
+  } else if (t < T.gone0) {
+    frame('var(--green)', 'var(--greenwash)', false);
+    text(g.x + 14, g.y + 24, 'sandbox', { size: 13, weight: 650, fill: 'var(--green)' });
+    check(cx, g.y + 66, 18);
+    text(cx, g.y + 116, 'Accepted', { size: 15, weight: 650, anchor: 'middle', fill: 'var(--ink)' });
   } else {
-    text(g.x + 10, g.y + 40, st.state === 'starting' ? 'starting' : 'idle', { size: 11, fill: 'var(--muted)' });
+    const o = 0.25 + 0.75 * ease(prog(t, T.gone0, T.gone0 + 0.6));
+    frame('var(--muted)', 'none', true, o);
+    put(`<path d="M${cx - 14} ${g.y + 44} l28 28 M${cx + 14} ${g.y + 44} l-28 28" stroke="var(--muted)" stroke-width="3" stroke-linecap="round" opacity="${o.toFixed(2)}"/>`);
+    text(cx, g.y + 108, 'sandbox destroyed', { size: 14, weight: 600, anchor: 'middle', fill: 'var(--muted)', opacity: o.toFixed(2) });
+  }
+}
+
+// Steps 4 and 5: one tile per runner instance.
+function tile(g, n, state, p) {
+  if (state === 'off') {
+    put(`<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="10" fill="none" stroke="var(--faint)" stroke-dasharray="4 5"/>`);
+    return;
+  }
+  const run = state === 'running';
+  put(`<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="10" fill="${run ? 'var(--orangewash)' : 'var(--surface)'}" stroke="${run ? 'var(--orange)' : 'var(--ink2)'}" stroke-width="${run ? 2 : 1.25}"${run ? '' : ' stroke-dasharray="5 5"'}/>`);
+  text(g.x + 12, g.y + 25, `instance ${n}`, { size: 13, weight: 650, fill: run ? 'var(--orange)' : 'var(--ink2)' });
+  if (run) {
+    put(`<rect x="${g.x + 12}" y="${g.y + 42}" width="${g.w - 24}" height="8" rx="4" fill="var(--faint)"/>`);
+    put(`<rect x="${g.x + 12}" y="${g.y + 42}" width="${((g.w - 24) * p).toFixed(1)}" height="8" rx="4" fill="var(--orange)"/>`);
+  } else {
+    text(g.x + 12, g.y + 50, state, { size: 13, fill: 'var(--muted)' });
   }
 }
 
 function draw(t) {
   t = ((t % DURATION) + DURATION) % DURATION;
-  const sc = scene(t);
+  const n = Math.max(0, STEPS.findIndex(s => within(t, s.from, s.to)));
+  const step = STEPS[n];
   out = [];
   put(`<defs>
-    <marker id="arrOn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="var(--ink2)"/></marker>
-    <marker id="arrOff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9 z" fill="var(--faint)"/></marker>
+    <marker id="arrOn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 1 L9 5 L0 9 z" fill="var(--ink2)"/></marker>
+    <marker id="arrOff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 1 L9 5 L0 9 z" fill="var(--faint)"/></marker>
   </defs>`);
   put(`<rect x="0.5" y="0.5" width="959" height="539" rx="12" fill="var(--page)" stroke="var(--faint)"/>`);
 
-  // header
-  text(24, 42, 'serverless-judge: what happens to a submission', { size: 16, weight: 650, fill: 'var(--ink)' });
-  const bill = billing(t);
-  text(880, 42, 'compute billing', { size: 13, anchor: 'end' });
-  pill(936, 37, bill ? 'on' : 'off', bill);
+  // header: what this is, and whether compute is being billed right now
+  const billed = within(t, T.apiUp, T.out1) || within(t, J[0].api, LAST);
+  text(40, 50, 'How a submission runs', { size: 17, weight: 650, fill: 'var(--ink)' });
+  text(868, 50, 'compute billing', { size: 14, anchor: 'end' });
+  pill(920, 45, billed ? 'on' : 'off', billed);
 
-  // which services are up
-  const apiUp = within(t, 2.45, 21.9);
-  const runnerCount = t < 3.8 ? 0 : t < 14.6 ? 1 : t < 14.9 ? 2 : t < 15.2 ? 3 : t < 21.3 ? 4 : 0;
-  const workerUp = within(t, 14.25, 21.6);
+  const apiUp = within(t, T.apiUp, T.apiDown);
+  const burst = t >= STEPS[3].from;
+  const runners = t < T.runnerUp ? 0 : t < DISPATCH[1] ? 1 : t < DISPATCH[2] ? 2 : t < DISPATCH[3] ? 3 : t < T.runnerDown ? (burst ? 4 : 1) : 0;
+  const direct = n === 1 || n === 2, queued = n === 3;
 
-  // everything but the runner steps back while the sandbox is the subject
-  const dim = sc === 'box' ? 1 - 0.68 * Math.min(prog(t, 8.0, 8.3), 1 - prog(t, 12.3, 12.6)) : 1;
-  const flowWait = sc === 'wait' || sc === 'box';
-  const flowQueue = sc === 'burst';
+  edge(P.in, direct || queued);
+  edge(P.top, direct);
+  edge(P.down, queued);
+  edge(P.up, queued);
 
-  put(`<g opacity="${dim.toFixed(2)}">`);
-  edge(P.in, flowWait || flowQueue, { both: true, label: 'submit', lx: 166, ly: LANE - 13 });
-  edge(P.store, flowWait || flowQueue, { both: true, label: 'store', lx: 289, ly: 298, anchor: 'start' });
-  edge(P.queue, flowQueue, { label: 'no wait: queue', lx: 491, ly: 292, anchor: 'start' });
-  edge(P.push, flowQueue, { label: 'push', lx: 574, ly: 371 });
-  edge(P.run, flowQueue, { both: true, label: 'run', lx: 643, ly: 337, anchor: 'start' });
-  edge(P.verdict, flowQueue, { label: 'verdict', lx: 482, ly: 455 });
+  box(B.client, true, { plain: true });
+  box(B.api, apiUp, { count: apiUp ? 1 : 0 });
 
-  // client
-  const c = B.client;
-  put(`<rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" rx="10" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.25"/>`);
-  text(c.x + 14, c.y + 28, c.title, { size: 15, weight: 650, fill: 'var(--ink)' });
-  text(c.x + 14, c.y + 47, c.sub, { size: 12 });
+  // the queue, and what is waiting in it
+  const waiting = J.filter(j => within(t, j.q, j.d)).length;
+  box(B.queue, queued, { plain: true, sub: waiting ? null : undefined });
+  for (let k = 0; k < waiting; k++) put(`<circle cx="${B.queue.x + 24 + k * 20}" cy="${B.queue.y + 52}" r="7" fill="var(--blue)"/>`);
 
-  // what the client has in hand
-  let chip = null;
-  if (within(t, 7.3, 12.6)) chip = { label: 'Accepted', good: true };
-  if (sc === 'burst') {
-    const got = J.filter(j => t >= j.api).length;
-    if (t >= POLL.back[1]) chip = { label: `${N} verdicts`, good: true };
-    else if (got > 0) chip = { label: got === 1 ? '1 token' : `${got} tokens`, good: false };
-  }
-  if (sc === 'zero' && t < 21.0) chip = { label: `${N} verdicts`, good: true };
-  if (chip) {
-    put(`<rect x="${c.x}" y="${c.y + c.h + 10}" width="${c.w}" height="28" rx="14" fill="${chip.good ? 'var(--greenwash)' : 'var(--bluewash)'}" stroke="${chip.good ? 'var(--green)' : 'var(--blue)'}"/>`);
-    if (chip.good) check(c.x + 18, c.y + c.h + 24, 8);
-    text(c.x + (chip.good ? 32 : c.w / 2), c.y + c.h + 28.5, chip.label, { size: 13, weight: 600, anchor: chip.good ? 'start' : 'middle', fill: 'var(--ink)' });
-  }
-
-  service(B.api, apiUp, apiUp ? 1 : 0);
-
-  let stored = 0;
-  if (sc === 'burst' || (sc === 'zero' && t < 21.0)) stored = J.filter(j => t >= j.stored).length;
-  managed(B.store, sc === 'burst' && stored > 0 ? `${stored} of ${N} verdicts stored` : B.store.sub);
-
-  // queue, with what is waiting in it
-  managed(B.queue, null);
-  const waiting = sc === 'burst' ? J.filter(j => t >= j.q && t < j.d).length : 0;
-  if (waiting > 0) {
-    for (let k = 0; k < waiting; k++) put(`<circle cx="${B.queue.x + 20 + k * 13}" cy="${B.queue.y + 43}" r="4.5" fill="var(--blue)"/>`);
-  } else {
-    text(B.queue.x + 14, B.queue.y + 47, sc === 'burst' && t > 14 ? 'empty' : 'queue', { size: 12 });
-  }
-  service(B.worker, workerUp, workerUp ? 1 : 0);
-  put('</g>');
-
-  // the direct lane belongs to both groups: keep it visible in the sandbox scene
-  edge(P.top, flowWait, { both: true, label: 'wait=true: run now', lx: 484, ly: LANE - 17 });
-
-  // runner: a stack hints at the other toolchains
-  const r = B.runner, up = runnerCount > 0;
-  for (const k of [2, 1]) put(`<rect x="${r.x + 6 * k}" y="${r.y - 6 * k}" width="${r.w}" height="${r.h}" rx="10" fill="var(--page)" stroke="var(--faint)"/>`);
-  put(`<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="10" fill="${up ? 'var(--surface)' : 'var(--page)'}" stroke="${up ? 'var(--blue)' : 'var(--axis)'}" stroke-width="${up ? 1.75 : 1.25}"${up ? '' : ' stroke-dasharray="5 4"'}/>`);
-  text(r.x + 16, r.y + 28, r.title, { size: 15, weight: 650, fill: up ? 'var(--ink)' : 'var(--muted)' });
-  text(r.x + 16, r.y + 46, r.sub, { size: 12, fill: up ? 'var(--ink2)' : 'var(--muted)' });
-  pill(r.x + r.w - 10, r.y, runnerCount === 1 ? '1 instance' : `${runnerCount} instances`, up);
-
-  const tiles = t >= 12.6 && t < 21.3;
-  if (!up) {
-    text(r.x + r.w / 2, r.y + 124, 'nothing running', { size: 13, anchor: 'middle', fill: 'var(--muted)' });
-  } else if (!tiles) {
-    slot(SLOT.A, slotAt('A', t));
-    slot(SLOT.B, slotAt('B', t));
+  // the runner, and what is inside it
+  box(B.runner, runners > 0, { count: runners });
+  if (!burst) {
+    sandbox(t);
+  } else if (runners === 0) {
+    text(SLOT.x + SLOT.w / 2, SLOT.y + 80, 'nothing running', { size: 14, anchor: 'middle', fill: 'var(--muted)' });
   } else {
     for (let k = 0; k < 4; k++) {
-      let st = { state: 'off' };
       const mine = J.filter(j => j.tile === k);
-      const first = k === 0 ? 0 : mine[0].d + 0.3;
-      if (t >= first) st = { state: t < first + 0.25 && k > 0 ? 'starting' : 'idle' };
-      for (const j of mine) if (within(t, j.run0, j.run1)) st = { state: 'running', p: prog(t, j.run0, j.run1) };
-      st.n = k + 1;
-      tile(TILE[k], st);
+      const born = k === 0 ? 0 : DISPATCH[k];
+      let state = t < born ? 'off' : t < mine[0].run0 && k > 0 ? 'starting' : 'idle', p = 0;
+      for (const j of mine) if (within(t, j.run0, j.run1)) { state = 'running'; p = prog(t, j.run0, j.run1); }
+      tile(TILE[k], k + 1, state, p);
     }
   }
-  text(r.x + 16, r.y + r.h - 14, 'limits: 2 s CPU, 256 MB, no network', { size: 12, fill: up ? 'var(--ink2)' : 'var(--muted)' });
 
-  // --- moving parts ---------------------------------------------------------
-  // wait=true: one submission, start to finish
-  travel(t, P.in, 2.0, 2.5, 'blue');
-  travel(t, P.store, 2.6, 3.0, 'blue', { r: 4.5 });
-  travel(t, P.top, 3.0, 3.9, 'blue', { dy: -5 });
-  travel(t, rev(P.top), 6.1, 6.8, 'green', { dy: 5 });
-  travel(t, P.store, 6.8, 7.1, 'green', { r: 4.5 });
-  travel(t, rev(P.in), 6.9, 7.3, 'green');
-  // two more, to show sandboxes taking turns
-  travel(t, P.top, 8.4, 9.1, 'blue', { dy: -5 });
-  travel(t, rev(P.top), 10.3, 11.0, 'green', { dy: 5 });
-  travel(t, P.top, 10.2, 10.9, 'blue', { dy: -5 });
-  travel(t, rev(P.top), 11.9, 12.5, 'green', { dy: 5 });
-  // the burst
+  // what the caller has in hand
+  if (within(t, T.out1, STEPS[3].from)) chip(B.client, 'Accepted', true);
+  if (burst && t < T.runnerDown) {
+    const got = J.filter(j => t >= j.api).length, done = J.filter(j => t >= j.run1).length;
+    if (done > 0) chip(B.client, `${done} of ${N} done`, done === N);
+    else if (got > 0) chip(B.client, got === 1 ? '1 token' : `${got} tokens`, false);
+  }
+
+  // --- the moving parts -------------------------------------------------------
+  travel(t, P.in, T.in0, T.apiUp, 'blue');
+  travel(t, P.top, T.apiUp, T.runnerUp, 'blue');
+  travel(t, rev(P.top), T.back0, T.back1, 'green');
+  travel(t, rev(P.in), T.back1, T.out1, 'green');
   for (const j of J) {
     travel(t, P.in, j.tin, j.api, 'blue');
-    travel(t, P.queue, j.api + 0.05, j.q, 'blue');
-    travel(t, P.push, j.d, j.d + 0.3, 'blue');
-    travel(t, P.run, j.d + 0.3, j.d + 0.55, 'blue', { dy: 0 });
-    travel(t, rev(P.run), j.run1, j.run1 + 0.2, 'green');
-    travel(t, P.verdict, j.run1 + 0.2, j.stored, 'green');
+    travel(t, P.down, j.api, j.q, 'blue');
+    travel(t, P.up, j.d, j.run0, 'blue');
   }
-  travel(t, P.in, POLL.out[0], POLL.out[1], 'blue');
-  travel(t, rev(P.store), POLL.read[0], POLL.read[1], 'green', { r: 4.5 });
-  travel(t, rev(P.in), POLL.back[0], POLL.back[1], 'green');
 
-  // --- caption ----------------------------------------------------------------
-  const [a, b] = SC[sc];
-  const fade = Math.min(prog(t, a, a + 0.25), 1);
-  text(24, 493, CAPTION[sc][0], { size: 20, weight: 650, fill: 'var(--ink)', opacity: fade.toFixed(2) });
-  text(24, 516, CAPTION[sc][1], { size: 14, opacity: fade.toFixed(2) });
-  const keys = Object.keys(SC), gap = 6, w = (960 - 48 - gap * (keys.length - 1)) / keys.length;
-  keys.forEach((k, i) => {
-    const x = 24 + i * (w + gap), done = t >= SC[k][1] ? 1 : k === sc ? prog(t, a, b) : 0;
-    put(`<rect x="${x}" y="527" width="${w}" height="3" rx="1.5" fill="var(--faint)"/>`);
-    if (done > 0) put(`<rect x="${x}" y="527" width="${(w * done).toFixed(1)}" height="3" rx="1.5" fill="var(--blue)"/>`);
+  // --- the two lines under the picture ----------------------------------------
+  const fade = prog(t, step.from, step.from + 0.4).toFixed(2);
+  put(`<rect x="40" y="468" width="104" height="28" rx="14" fill="var(--blue)"/>`);
+  text(92, 487, `Step ${n + 1} of ${STEPS.length}`, { size: 14, weight: 650, anchor: 'middle', fill: '#ffffff' });
+  text(158, 489, step.title, { size: 21, weight: 650, fill: 'var(--ink)', opacity: fade });
+  text(40, 517, step.sub, { size: 15, opacity: fade });
+  const gap = 6, w = (960 - 80 - gap * (STEPS.length - 1)) / STEPS.length;
+  STEPS.forEach((s, i) => {
+    const x = 40 + i * (w + gap), done = i < n ? 1 : i === n ? prog(t, s.from, s.to) : 0;
+    put(`<rect x="${x}" y="528" width="${w}" height="3" rx="1.5" fill="var(--faint)"/>`);
+    if (done > 0) put(`<rect x="${x}" y="528" width="${(w * done).toFixed(1)}" height="3" rx="1.5" fill="var(--blue)"/>`);
   });
 
   document.getElementById('s').innerHTML = out.join('');
 }
 window.draw = draw;
 
-if (q.has('t')) draw(parseFloat(q.get('t')));
+if (q.has('step')) draw(STEPS[clamp(parseInt(q.get('step'), 10) - 1, 0, STEPS.length - 1)].still);
+else if (q.has('t')) draw(parseFloat(q.get('t')));
 else { const t0 = performance.now(); (function loop() { draw((performance.now() - t0) / 1000); requestAnimationFrame(loop); })(); }
 </script>
 </body>
