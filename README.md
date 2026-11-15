@@ -479,6 +479,31 @@ so this is an estimate and not a bill. Setting `min_instances` or
 `api_min_instances` above 0 is what turns idle cost on: those instances
 never stop.
 
+### Image sizes
+
+One image per toolchain and one shared by the API and the worker. Sizes are
+compressed, which is what Artifact Registry stores and bills and what Cloud
+Run pulls. Measured on the deployed images on 15 November 2026.
+
+| Image | Runs | Size |
+|---|---|---|
+| `judge-api` | the API and the worker | 8 MB |
+| `runner-php` | PHP 8.4 | 46 MB |
+| `runner-postgres` | PostgreSQL 18 | 47 MB |
+| `runner-python` | Python 3.13 | 72 MB |
+| `runner-go` | Go 1.26 | 85 MB |
+| `runner-node` | JavaScript and TypeScript on Node.js 24 | 96 MB |
+| `runner-gcc` | C and C++ on GCC 14 | 152 MB |
+| `runner-java` | Java on OpenJDK 25 | 159 MB |
+| `runner-mysql` | MySQL 8.4 | 244 MB |
+| `runner-rust` | Rust | 333 MB |
+| `runner-dotnet` | C# on .NET 10 | 355 MB |
+
+The eleven add up to 1.6 GB. Two build stages are stored beside them:
+`judge-bin` (3 MB, the runner binary copied into every runner image) and
+`postgres-prebuilt` (158 MB, PostgreSQL as compiled, from which
+`runner-postgres` takes only what it needs).
+
 ## Tests
 
 ```bash
