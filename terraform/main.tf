@@ -139,10 +139,19 @@ resource "google_service_account" "pusher" {
   depends_on   = [time_sleep.apis]
 }
 
+# The API may use its own database and no other. Without the condition this
+# role reaches every Firestore database in the project, which matters as soon
+# as the judge shares a project with something else.
 resource "google_project_iam_member" "api_firestore" {
   project = var.project
   role    = "roles/datastore.user"
   member  = google_service_account.api.member
+
+  condition {
+    title       = "${local.prefix}judge database only"
+    description = "serverless-judge may use its own Firestore database and no other"
+    expression  = "resource.name == \"projects/${var.project}/databases/${google_firestore_database.judge.name}\""
+  }
 }
 
 # Pub/Sub signs each push as the pusher account, which it may only do if its

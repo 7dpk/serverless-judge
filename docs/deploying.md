@@ -87,6 +87,9 @@ effect yet, which can take a few minutes.
   `min_instance_count = 0` and `cpu_idle = true`. The second one matters:
   without it Terraform deploys "CPU always allocated", which bills for the
   whole life of every instance.
+- **Database access is scoped.** The API's service account gets its
+  Firestore role with a condition that names the judge's own database, so
+  the judge can share a project with other things that use Firestore.
 - **Regions.** Any region with second-generation Cloud Run should work: the
   sandbox documentation listed no region limits when read on 14 November
   2026. It has been deployed and tested in `us-central1`, `us-east1`,
@@ -112,8 +115,15 @@ dropped connection and continued by running it again, and a destroy
 followed by an apply under the same names (the log bucket was restored
 automatically; the database name was free after 5 minutes).
 
-Not tested: a brand-new project (the APIs were already enabled), and a
-remote state backend.
+On 15 November 2026 it went into a shared project that already ran 200
+other Cloud Run services in `europe-west1`, with the Firestore API not yet
+enabled: one apply, 103 resources, 11 min 2 s, the 70 checks passed, and a
+second plan showed no changes. That run is also the test of the scoped
+database role.
+
+Not tested: a brand-new project (most of the APIs were already enabled
+each time), a remote state backend, and that the scoped role is refused on
+a second database (none of the test projects had one).
 
 ## With deploy.sh
 
@@ -127,6 +137,10 @@ gcloud config set project <project>
 ./deploy.sh status         # URLs
 ./deploy.sh key            # the API key
 ```
+
+One difference from Terraform: `deploy.sh` grants the API's Firestore role
+on the whole project, not on the judge's database alone. In a project the
+judge shares with other things, use Terraform.
 
 ## Adding packages
 
