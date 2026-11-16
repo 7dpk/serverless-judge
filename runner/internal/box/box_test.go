@@ -62,6 +62,8 @@ func TestVerdict(t *testing.T) {
 		{name: "output cut off", truncated: true, want: proto.StatusOLE},
 		{name: "filled the filesystem", killed: "disk", signal: 9, exit: -1, want: proto.StatusOLE},
 		{name: "file size signal", signal: int(syscall.SIGXFSZ), exit: -1, want: proto.StatusOLE},
+		{name: "downloaded more than allowed", killed: "net", signal: 9, exit: -1, want: proto.StatusOLE},
+		{name: "wrote more output than allowed on a network run", killed: "out", signal: 9, exit: -1, want: proto.StatusOLE},
 		{name: "segfault", signal: int(syscall.SIGSEGV), exit: -1, want: proto.StatusRE},
 		{name: "non-zero exit", exit: 3, want: proto.StatusRE},
 	}
@@ -181,5 +183,22 @@ func TestMemWatchSchedule(t *testing.T) {
 	}
 	if w.peakKB != 363_000 {
 		t.Errorf("peak should follow exact readings, got %d", w.peakKB)
+	}
+}
+
+func TestNetCreditMs(t *testing.T) {
+	cases := []struct{ rxKB, usPerMB, want int }{
+		{0, 15000, 0},
+		{1024, 15000, 15},               // 1 MB at 15 ms per MB
+		{125 * 1024, 15000, 1875},       // a full 125 MB download
+		{512, 15000, 7},                 // half a MB, rounded down
+		{125 * 1024, 0, 0},              // credit switched off
+		{-5, 15000, 0},                  // a counter that went backwards
+		{1 << 20, 1000 * 1000, 1024000}, // the largest values the runner accepts
+	}
+	for _, c := range cases {
+		if got := netCreditMs(c.rxKB, c.usPerMB); got != c.want {
+			t.Errorf("netCreditMs(%d, %d) = %d, want %d", c.rxKB, c.usPerMB, got, c.want)
+		}
 	}
 }

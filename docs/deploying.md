@@ -15,8 +15,8 @@ stay with it.
 `terraform/` creates everything: the APIs, the image registry, the images
 (built by Cloud Build, so you only need gcloud locally), three service
 accounts, the Firestore database with its expiry rules, the Pub/Sub queue,
-the 7-day log bucket, the twelve Cloud Run services and the language
-registry.
+the 7-day log bucket, the Cloud Run services (the API, the worker and one
+per folder of `languages/`) and the language registry.
 
 ```bash
 gcloud auth login                         # used for the image builds
@@ -41,6 +41,10 @@ Put settings in `terraform.tfvars` (there's a `terraform.tfvars.example`):
 | `cpu_quota` | `200` | The regional CPU quota the caps must fit in (see [Capacity](performance.md#capacity-and-the-cpu-quota)) |
 | `api_min_instances` | `0` | Keep API instances warm: no cold start, but an idle cost |
 | `submission_ttl_hours` | `144` | How long submissions are kept |
+| `allow_network` | `false` | Let a submission ask for network access with `enable_network` (see [Network access](api.md#network-access)) |
+| `network_time_limit` | `30` | Seconds such a run may wait on the network, on top of its wall time limit |
+| `max_network_time_limit` | `60` | The most a submission may ask for as `network_time_limit` |
+| `max_download_mb` | `125` | The most such a run may download, and the largest file it may write |
 | `name_prefix` | none | Run a second copy in the same project, for example `"staging-"` |
 | `firestore_location` | the region | For a multi-region database such as `nam5` |
 | `delete_data_on_destroy` | `false` | Let `terraform destroy` delete the database too |
@@ -121,9 +125,16 @@ enabled: one apply, 103 resources, 11 min 2 s, the 70 checks passed, and a
 second plan showed no changes. That run is also the test of the scoped
 database role.
 
+The five shared language services and network access came later, on 15 and
+16 November 2026, and went to the `us-central1` copy with `deploy.sh`. The
+live suite, by then 116 checks, passed there, the first runs on freshly
+started instances included.
+
 Not tested: a brand-new project (most of the APIs were already enabled
-each time), a remote state backend, and that the scoped role is refused on
-a second database (none of the test projects had one).
+each time), a remote state backend, that the scoped role is refused on a
+second database (none of the test projects had one), and the shared
+language services and network access through Terraform, which has planned
+them but not applied them.
 
 ## With deploy.sh
 
@@ -137,6 +148,12 @@ gcloud config set project <project>
 ./deploy.sh status         # URLs
 ./deploy.sh key            # the API key
 ```
+
+Settings are environment variables, for example `REGION`, `QUOTA_VCPU`,
+`API_MIN_INSTANCES` and, for network access, `ALLOW_NETWORK=1` with
+`NETWORK_TIME_LIMIT`, `MAX_NETWORK_TIME_LIMIT` and `MAX_DOWNLOAD_MB`. The
+runners and the API each keep their own network switch, so pass
+`ALLOW_NETWORK` to every `deploy.sh` command of a copy that should have it.
 
 One difference from Terraform: `deploy.sh` grants the API's Firestore role
 on the whole project, not on the judge's database alone. In a project the
@@ -155,9 +172,9 @@ Edit the family's package list, then `terraform apply` or
 | go | `packages.txt` (`module@version`) |
 | rust | `Cargo.toml` |
 | php | `composer.json` |
-| gcc | `apt-packages.txt` |
+| gcc, script, functional, native | `apt-packages.txt` (Debian packages) |
 
-C# has no package list yet.
+C#, Swift and the languages in `jvm` have no package list yet.
 
 ## Adding a language
 
@@ -172,3 +189,24 @@ Create `languages/<family>/` with:
 
 Then `terraform apply` or `./deploy.sh lang <family>`. The API needs no
 redeploy: it re-reads the registry when it meets an id it doesn't know.
+
+A few things that were learned the hard way and are worth copying:
+
+- **Test the image while it is built.** `languages/native/selftest.sh` and
+  its siblings compile and run one small program per language as a build
+  step, under the 1 MB file-size limit a judged program has. A language
+  that doesn't work fails the build and never reaches a deploy.
+- **A new folder is a new service**, and its `max_instances` counts against
+  the CPU quota (see [Capacity](performance.md#capacity-and-the-cpu-quota)).
+  A language that is asked for rarely is cheaper as one more `langs/*.json`
+  in an image that already has room for it, which is why `script`, `jvm`,
+  `functional` and `native` each hold several.
+- **Runtimes that map a large file at start** die under the file-size
+  limit. .NET needs `DOTNET_EnableWriteXorExecute=0` and the Erlang VM
+  needs `+JMsingle true`; both are set in the manifest's `env`.
+- **Runtimes with a slow start** can be given `runtime_cpu_ms`: CPU time
+  that is added to the limit and taken off the reported time, so the
+  program is judged on its own work. It is set for Elixir, Erlang, Clojure
+  and Groovy, from what an empty program costs in a sandbox on an instance
+  that has just started. That is when it costs most: Groovy used 2.8 s
+  there against about 1.2 s warm.

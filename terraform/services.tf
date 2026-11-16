@@ -35,6 +35,13 @@ resource "google_cloud_run_v2_service" "runner" {
       image            = terraform_data.runner_image[each.key].output
       sandbox_launcher = true
 
+      # The runner refuses a request for network access unless this is 1,
+      # whatever the API asks of it.
+      env {
+        name  = "JUDGE_ALLOW_NETWORK"
+        value = var.allow_network ? "1" : "0"
+      }
+
       resources {
         limits = {
           cpu    = each.value.cpu
@@ -81,6 +88,11 @@ locals {
     FIRESTORE_DB         = google_firestore_database.judge.name
     QUEUE_TOPIC          = google_pubsub_topic.runs.name
     SUBMISSION_TTL_HOURS = tostring(var.submission_ttl_hours)
+
+    ALLOW_ENABLE_NETWORK   = var.allow_network ? "1" : "0"
+    NETWORK_TIME_LIMIT     = tostring(min(var.network_time_limit, var.max_network_time_limit))
+    MAX_NETWORK_TIME_LIMIT = tostring(var.max_network_time_limit)
+    MAX_DOWNLOAD_MB        = tostring(var.max_download_mb)
   }
 }
 

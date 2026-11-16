@@ -1,0 +1,15 @@
+{
+  "name": "perl",
+  "title": "Perl (5.40)",
+  "ids": [
+    85
+  ],
+  "source_file": "main.pl",
+  "run": {
+    "cmd": [
+      "perl",
+      "main.pl",
+      "{args}"
+    ]
+  }
+}

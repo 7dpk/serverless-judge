@@ -1,0 +1,17 @@
+{
+  "name": "r",
+  "title": "R (4.5)",
+  "ids": [
+    80,
+    99
+  ],
+  "source_file": "main.R",
+  "run": {
+    "cmd": [
+      "Rscript",
+      "--vanilla",
+      "main.R",
+      "{args}"
+    ]
+  }
+}

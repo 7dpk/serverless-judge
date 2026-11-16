@@ -1,0 +1,27 @@
+{
+  "name": "haskell",
+  "title": "Haskell (GHC 9.6)",
+  "ids": [
+    61
+  ],
+  "source_file": "main.hs",
+  "stack_kb": 262144,
+  "compile": {
+    "cmd": [
+      "ghc",
+      "-O2",
+      "-o",
+      "main",
+      "{options}",
+      "main.hs"
+    ],
+    "cpu_ms": 40000,
+    "wall_ms": 60000
+  },
+  "run": {
+    "cmd": [
+      "./main",
+      "{args}"
+    ]
+  }
+}

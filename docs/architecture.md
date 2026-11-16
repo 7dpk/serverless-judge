@@ -20,7 +20,9 @@ client ─X-Auth-Token─> judge-api ──────────────�
   callers.
 - **runner-\<family\>** (`languages/<family>/`) is one Cloud Run service per
   toolchain image, concurrency 1, with a service account that has no roles.
-  Only the API's identity may invoke it.
+  Only the API's identity may invoke it. The busy languages have an image
+  each; the rest share five (`script`, `jvm`, `swift`, `functional`,
+  `native`), so they don't each hold a slice of the CPU quota.
 - **judge** (`runner/`) is one static binary in every image. `judge serve`
   is the HTTP server. For each job it starts `sandbox do -- judge box`, the
   supervisor that compiles, runs each test under limits and reports back.
@@ -53,6 +55,45 @@ client ─X-Auth-Token─> judge-api ──────────────�
   or untagged report is an Internal Error, never a pass.
 - CPU, wall time, memory, output size, file size, process count and total
   filesystem growth are all capped.
+
+### Network access
+
+Off by default, and then none of this applies: no sandbox has a network.
+A deployment can allow it (`allow_network`), and a submission then has to
+ask (`enable_network`) with a key that may. See
+[the API page](api.md#network-access) for the limits; this is how they
+hold.
+
+- **A sandbox of its own.** Network access is decided when a sandbox is
+  created. A run that asks gets a new sandbox made with it; the sandbox
+  kept waiting for the next job never has it, and no ordinary run can end
+  up in one that does.
+- **Two switches.** The API refuses to pass the request on unless the
+  deployment allows it, and each runner refuses it again unless it was
+  itself deployed with network access allowed.
+- **What it can reach** (measured from inside such a sandbox): public
+  hosts, over IPv4, on any TCP port except 25. The metadata server answers
+  DNS and nothing else, so there are still no credentials to fetch. The
+  runner hosting the sandbox isn't reachable, and the runner services have
+  no VPC attached.
+- **Counted twice.** The supervisor reads the sandbox's network counter
+  every few milliseconds: past the download limit it stops the run, and
+  what has arrived so far sets the CPU credit. The runner, outside the
+  sandbox, reads the instance's counter as well. A program can stop or
+  kill the supervisor it shares a sandbox with; it can't reach the runner.
+  In a test a program froze the supervisor and went on downloading: the
+  runner destroyed the sandbox at the limit and the submission ended as
+  Internal Error, 4.5 s after it started.
+- **Time.** The wall limit grows by the network time allowed; the CPU limit
+  only by the credit for bytes received. A program that hangs on a
+  connection ends as Time Limit Exceeded when the wall limit is up.
+
+What it doesn't do: filter where a run may connect. Cloud Run has no such
+control for a sandbox, and the ones that exist for a service (a NAT
+gateway, a proxy) have an hourly price, which would end "costs nothing
+while idle". So a caller who may ask for network access can make the
+judge talk to any public host for up to about 70 seconds per run. Grant it
+accordingly.
 
 Cloud Run sandboxes are in **public preview**: no SLA, and behaviour may
 change. If that becomes a problem the fallback is the first-generation
@@ -94,4 +135,12 @@ sandbox CLI.
 - Admin keys have no quota or rate limit. Temporary tokens have a
   submission cap but no rate limit.
 - Instance caps are fixed per family, so a spike in one language can't
-  borrow capacity that another language isn't using.
+  borrow capacity that another language isn't using. For a drive in one
+  language, raise that family's cap for the day
+  (`max_instances = { python = 60 }`), or ask Google for a larger quota and
+  raise them all: see
+  [Capacity](performance.md#capacity-and-the-cpu-quota).
+- Some first HTTPS connections from a sandbox with network access take
+  about 3.6 s to complete their handshake (seen to S3, npm and Cloudflare,
+  not to Google, GitHub or PyPI). The cause wasn't found; it is one reason
+  the default network time is as long as 30 s.

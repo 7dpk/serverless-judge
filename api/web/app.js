@@ -73,6 +73,10 @@ async function start() {
     $("who").textContent = (me.body.label ? me.body.label + ": " : "") + left + " submissions left, valid until " + until;
   }
 
+  // Shown only to a key that may ask for network access, on a deployment
+  // that allows it.
+  $("netbox").hidden = !me.body.network;
+
   const res = await api("/languages");
   if (res.status !== 200) return showGate(explain(res));
   // Several Judge0 ids can point at one language; show each language once.
@@ -125,6 +129,12 @@ function submission(key, code, stdin, expected) {
   return body;
 }
 
+// Only a single run can ask for network access; "Run all" never does.
+function withNetwork(body) {
+  if (!$("netbox").hidden && $("net").value === "1") body.enable_network = true;
+  return body;
+}
+
 async function run() {
   const btn = $("run");
   btn.disabled = true;
@@ -135,7 +145,7 @@ async function run() {
   try {
     res = await api("/submissions?wait=true&fields=*", {
       method: "POST",
-      body: JSON.stringify(submission($("lang").value, $("code").value, $("stdin").value, $("expected").value)),
+      body: JSON.stringify(withNetwork(submission($("lang").value, $("code").value, $("stdin").value, $("expected").value))),
     });
   } catch (e) {
     res = { status: 0, body: { error: "Could not reach the judge." }, timing: "" };

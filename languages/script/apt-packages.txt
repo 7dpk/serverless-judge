@@ -1,0 +1,2 @@
+# Extra Debian packages for the scripting languages, one per line.
+# Example: ruby-nokogiri, r-cran-data.table, lua-cjson

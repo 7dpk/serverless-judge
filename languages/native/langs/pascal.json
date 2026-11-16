@@ -1,0 +1,24 @@
+{
+  "name": "pascal",
+  "title": "Pascal (FPC 3.2)",
+  "ids": [
+    67
+  ],
+  "source_file": "main.pas",
+  "stack_kb": 262144,
+  "compile": {
+    "cmd": [
+      "fpc",
+      "-O2",
+      "-omain",
+      "{options}",
+      "main.pas"
+    ]
+  },
+  "run": {
+    "cmd": [
+      "./main",
+      "{args}"
+    ]
+  }
+}

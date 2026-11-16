@@ -16,12 +16,19 @@ import (
 	"sync/atomic"
 	"time"
 
+	"serverless-judge/runner/internal/netstat"
 	"serverless-judge/runner/proto"
 )
 
 const (
 	maxReportBytes = 96 << 20
 	readyTimeout   = 30 * time.Second
+
+	// A run with network access is watched from out here as well, where
+	// the program cannot reach: if the whole instance has received this
+	// much more than the run may, the sandbox is destroyed.
+	hostRxEvery   = 200 * time.Millisecond
+	hostRxSlackKB = 32 * 1024
 )
 
 // sbx is one sandbox with the supervisor already started inside it, blocked
@@ -68,7 +75,10 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-func (p *Pool) spawn() (*sbx, error) {
+// spawn creates a sandbox. egress gives it outbound network access, which
+// can only be decided when a sandbox is created; every other sandbox has no
+// network at all.
+func (p *Pool) spawn(egress bool) (*sbx, error) {
 	// The first sandbox also warms the instance's file cache.
 	// (Atomic, not p.mu: Refill calls spawn with the mutex held.)
 	boxArgs := []string{"box", p.langDir}
@@ -91,10 +101,7 @@ func (p *Pool) spawn() (*sbx, error) {
 		s.cmd = exec.Command(p.selfBin, boxArgs...)
 		s.cmd.Env = p.env
 	} else {
-		args := []string{"do", "--sandbox-name", s.name, "-w", "/"}
-		if p.writable {
-			args = append(args, "--write")
-		}
+		args := sandboxArgs(s.name, p.writable, egress)
 		for _, kv := range p.env {
 			args = append(args, "-e", kv)
 		}
@@ -156,6 +163,18 @@ func (p *Pool) spawn() (*sbx, error) {
 	return s, nil
 }
 
+// sandboxArgs is the launcher command line up to the environment.
+func sandboxArgs(name string, writable, egress bool) []string {
+	args := []string{"do", "--sandbox-name", name, "-w", "/"}
+	if writable {
+		args = append(args, "--write")
+	}
+	if egress {
+		args = append(args, "--allow-egress")
+	}
+	return args
+}
+
 // readLine reads up to and including '\n', failing on oversized lines so a
 // misbehaving sandbox cannot exhaust the runner's memory.
 func readLine(r *bufio.Reader, max int) ([]byte, error) {
@@ -173,8 +192,14 @@ func readLine(r *bufio.Reader, max int) ([]byte, error) {
 	}
 }
 
-// take returns the spare if there is one, otherwise a new sandbox.
-func (p *Pool) take() (s *sbx, warm bool, err error) {
+// take returns the spare if there is one, otherwise a new sandbox. A job
+// that needs the network always gets a new one: the spare was created
+// without it, and stays where it is for the next ordinary job.
+func (p *Pool) take(egress bool) (s *sbx, warm bool, err error) {
+	if egress {
+		s, err = p.spawn(true)
+		return s, false, err
+	}
 	p.mu.Lock()
 	s, p.spare = p.spare, nil
 	p.mu.Unlock()
@@ -193,7 +218,7 @@ func (p *Pool) take() (s *sbx, warm bool, err error) {
 		}
 		return s, warm, nil
 	}
-	s, err = p.spawn()
+	s, err = p.spawn(false)
 	return s, false, err
 }
 
@@ -209,7 +234,7 @@ func (p *Pool) Refill() {
 			return
 		}
 	}
-	if s, err := p.spawn(); err == nil {
+	if s, err := p.spawn(false); err == nil {
 		p.spare = s
 	}
 }
@@ -243,10 +268,11 @@ func (p *Pool) Run(job *proto.Job, budget time.Duration) (*proto.RunResponse, er
 	}
 	payload = append(payload, '\n')
 
+	net := job.Req.Network
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		t0 := time.Now()
-		s, warm, err := p.take()
+		s, warm, err := p.take(net != nil)
 		if err != nil {
 			lastErr = fmt.Errorf("start sandbox: %w", err)
 			continue
@@ -271,38 +297,72 @@ func (p *Pool) Run(job *proto.Job, budget time.Duration) (*proto.RunResponse, er
 			s.stdin.Close()
 		}()
 
-		resp, err := p.await(s, job.Nonce, budget)
+		rxCapKB := 0
+		if net != nil {
+			// Each test may receive RxKB, and the instance serves nothing
+			// else meanwhile.
+			rxCapKB = net.RxKB*len(job.Req.Tests) + hostRxSlackKB
+		}
+		resp, hostRxKB, err := p.await(s, job.Nonce, budget, rxCapKB)
 		if err != nil {
 			return nil, err // the job may have started: never run it twice
 		}
 		resp.Meta.Warm = warm
 		resp.Meta.SandboxWaitMs = waitMs
+		resp.Meta.Network = net != nil
+		resp.Meta.HostRxKB = hostRxKB
 		return resp, nil
 	}
 	return nil, lastErr
 }
 
-func (p *Pool) await(s *sbx, nonce string, budget time.Duration) (*proto.RunResponse, error) {
+// await waits for the supervisor's report. rxCapKB > 0 also limits what the
+// instance may receive while it waits; hostRxKB is what it did receive.
+func (p *Pool) await(s *sbx, nonce string, budget time.Duration, rxCapKB int) (resp *proto.RunResponse, hostRxKB int, err error) {
 	prefix := []byte(nonce + " ")
 	deadline := time.NewTimer(budget)
 	defer deadline.Stop()
+
+	var rxTick <-chan time.Time
+	rxBase, rxOK := uint64(0), false
+	if rxCapKB > 0 {
+		if rxBase, rxOK = netstat.RxBytes(); rxOK {
+			t := time.NewTicker(hostRxEvery)
+			defer t.Stop()
+			rxTick = t.C
+		}
+	}
+	received := func() int {
+		if now, ok := netstat.RxBytes(); ok && now > rxBase {
+			return int((now - rxBase) / 1024)
+		}
+		return 0
+	}
 	for {
 		select {
+		case <-rxTick:
+			if got := received(); got > rxCapKB {
+				p.destroy(s)
+				return nil, got, errors.New("sandbox exceeded its download limit and was destroyed")
+			}
 		case line, ok := <-s.lines:
 			if !ok {
-				return nil, fmt.Errorf("sandbox ended without a report: %s", s.stderr.String())
+				return nil, 0, fmt.Errorf("sandbox ended without a report: %s", s.stderr.String())
 			}
 			if !bytes.HasPrefix(line, prefix) {
 				continue // not written by the supervisor
 			}
-			var resp proto.RunResponse
-			if err := json.Unmarshal(line[len(prefix):], &resp); err != nil {
-				return nil, fmt.Errorf("bad report: %w", err)
+			var out proto.RunResponse
+			if err := json.Unmarshal(line[len(prefix):], &out); err != nil {
+				return nil, 0, fmt.Errorf("bad report: %w", err)
 			}
-			return &resp, nil
+			if rxOK {
+				hostRxKB = received()
+			}
+			return &out, hostRxKB, nil
 		case <-deadline.C:
 			p.destroy(s)
-			return nil, errors.New("sandbox exceeded its time budget and was destroyed")
+			return nil, 0, errors.New("sandbox exceeded its time budget and was destroyed")
 		}
 	}
 }

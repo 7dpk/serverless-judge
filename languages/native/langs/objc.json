@@ -1,0 +1,21 @@
+{
+  "name": "objc",
+  "title": "Objective-C (Clang 19, GNUstep)",
+  "ids": [
+    79
+  ],
+  "source_file": "main.m",
+  "stack_kb": 262144,
+  "compile": {
+    "cmd": [
+      "/opt/lang/objc.sh",
+      "{options}"
+    ]
+  },
+  "run": {
+    "cmd": [
+      "./main",
+      "{args}"
+    ]
+  }
+}

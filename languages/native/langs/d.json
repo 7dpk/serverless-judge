@@ -1,0 +1,25 @@
+{
+  "name": "d",
+  "title": "D (GDC 14)",
+  "ids": [
+    56
+  ],
+  "source_file": "main.d",
+  "stack_kb": 262144,
+  "compile": {
+    "cmd": [
+      "gdc",
+      "-O2",
+      "-o",
+      "main",
+      "{options}",
+      "main.d"
+    ]
+  },
+  "run": {
+    "cmd": [
+      "./main",
+      "{args}"
+    ]
+  }
+}

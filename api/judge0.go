@@ -94,6 +94,8 @@ type Input struct {
 	MaxFileSize    flexStr `json:"max_file_size"`
 	MaxProcs       flexStr `json:"max_processes_and_or_threads"`
 	RedirectStderr flexStr `json:"redirect_stderr_to_stdout"`
+	EnableNetwork  flexStr `json:"enable_network"`
+	NetTimeLimit   flexStr `json:"network_time_limit"` // not in Judge0
 }
 
 // Submission is the stored record. Blob fields hold raw bytes in memory and
@@ -118,6 +120,10 @@ type Submission struct {
 	FileKB         int    `firestore:"file_kb"`
 	Procs          int    `firestore:"procs"`
 	RedirectStderr bool   `firestore:"redirect_stderr"`
+	// Network is set only when the caller asked for network access and the
+	// deployment allows it. NetMs is how long a run may wait on it.
+	Network bool `firestore:"network"`
+	NetMs   int  `firestore:"net_ms"`
 
 	StatusID      int    `firestore:"status_id"`
 	Stdout        []byte `firestore:"stdout"`
@@ -283,6 +289,14 @@ func (a *App) build(in *Input, b64 bool, now time.Time) (*Submission, fieldError
 	s.Procs = int(limit(in.MaxProcs, "max_processes_and_or_threads", float64(c.DefaultProcs), float64(c.MaxProcs)))
 	s.RedirectStderr = in.RedirectStderr.truthy()
 
+	// Where the deployment does not allow network access the request for it
+	// is ignored, as it always was: the program runs without a network and
+	// the submission reads enable_network false.
+	if c.AllowNetwork && in.EnableNetwork.truthy() {
+		s.Network = true
+		s.NetMs = int(limit(in.NetTimeLimit, "network_time_limit", c.DefaultNetTime, c.MaxNetTime)*1000 + 0.5)
+	}
+
 	if len(errs) > 0 {
 		return nil, errs
 	}
@@ -290,11 +304,27 @@ func (a *App) build(in *Input, b64 bool, now time.Time) (*Submission, fieldError
 	return s, nil
 }
 
+// buildFor is build for a known caller: network access also needs a key
+// that may use it.
+func (a *App) buildFor(p principal, in *Input, b64 bool, now time.Time) (*Submission, fieldErrors) {
+	s, errs := a.build(in, b64, now)
+	if errs == nil && s.Network && !p.mayNetwork() {
+		return nil, fieldErrors{"enable_network": {"is not allowed for this token"}}
+	}
+	return s, errs
+}
+
 // groupKey is equal for submissions that are the same program under the
 // same limits, differing only in stdin and expected output. A batch of those
 // is compiled once and run as several tests in one sandbox.
+//
+// A submission with network access is never grouped: each one gets a sandbox
+// of its own, so what one run downloads is not there for the next.
 func groupKey(s *Submission) string {
 	h := sha256.New()
+	if s.Network {
+		fmt.Fprintf(h, "net\x00%s\x00", s.Token)
+	}
 	fmt.Fprintf(h, "%d\x00%s\x00%s\x00%d\x00%d\x00%d\x00%d\x00%d\x00%t\x00",
 		s.LanguageID, s.CompilerOpts, s.Args, s.CPUMs, s.WallMs, s.MemoryKB, s.FileKB, s.Procs, s.RedirectStderr)
 	h.Write(s.Source)
@@ -411,6 +441,7 @@ var allFields = []string{
 	"enable_network", "number_of_runs", "additional_files", "callback_url", "stdout", "stderr",
 	"compile_output", "message", "exit_code", "exit_signal", "status", "created_at", "finished_at",
 	"token", "time", "wall_time", "memory", "status_id", "language",
+	"network_time_limit",
 }
 
 func parseFields(q string) ([]string, error) {
@@ -558,7 +589,13 @@ func (a *App) render(s *Submission, fields []string, b64 bool) map[string]any {
 			}
 		case "number_of_runs":
 			v = 1
-		case "enable_network", "enable_per_process_and_thread_time_limit", "enable_per_process_and_thread_memory_limit":
+		case "enable_network":
+			v = s.Network
+		case "network_time_limit":
+			if s.Network {
+				v = secs(s.NetMs)
+			}
+		case "enable_per_process_and_thread_time_limit", "enable_per_process_and_thread_memory_limit":
 			v = false
 		}
 		out[f] = v

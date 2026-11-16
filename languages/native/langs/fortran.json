@@ -1,0 +1,25 @@
+{
+  "name": "fortran",
+  "title": "Fortran (GFortran 14)",
+  "ids": [
+    59
+  ],
+  "source_file": "main.f90",
+  "stack_kb": 262144,
+  "compile": {
+    "cmd": [
+      "gfortran",
+      "-O2",
+      "-o",
+      "main",
+      "{options}",
+      "main.f90"
+    ]
+  },
+  "run": {
+    "cmd": [
+      "./main",
+      "{args}"
+    ]
+  }
+}

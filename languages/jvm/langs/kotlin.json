@@ -1,0 +1,36 @@
+{
+  "name": "kotlin",
+  "title": "Kotlin (2.4)",
+  "ids": [
+    78,
+    111
+  ],
+  "source_file": "Main.kt",
+  "env": {
+    "JAVA_OPTS": "-XX:+UseSerialGC -XX:TieredStopAtLevel=1"
+  },
+  "compile": {
+    "cmd": [
+      "kotlinc",
+      "-nowarn",
+      "-d",
+      ".",
+      "{options}",
+      "Main.kt"
+    ],
+    "cpu_ms": 40000,
+    "wall_ms": 60000
+  },
+  "run": {
+    "cmd": [
+      "java",
+      "-XX:+UseSerialGC",
+      "-Xss64m",
+      "-Xmx{memory_mb}m",
+      "-cp",
+      ".:/opt/lang/kotlinc/lib/kotlin-stdlib.jar",
+      "MainKt",
+      "{args}"
+    ]
+  }
+}

@@ -163,3 +163,94 @@ func TestPoolDestroysSandboxPastItsBudget(t *testing.T) {
 		t.Errorf("gave up after %v, budget was 300ms", took)
 	}
 }
+
+// fakeLauncher stands in for the Cloud Run sandbox command: it logs how it
+// was called, applies the -e variables, and runs what follows "--".
+func fakeLauncher(t *testing.T) (bin, log string) {
+	t.Helper()
+	dir := t.TempDir()
+	bin, log = filepath.Join(dir, "sandbox"), filepath.Join(dir, "launches.log")
+	script := `#!/bin/sh
+echo "$@" >> "` + log + `"
+[ "$1" = do ] || exit 0
+shift
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --) shift; break ;;
+    -e) export "$2"; shift 2 ;;
+    --sandbox-name|-w) shift 2 ;;
+    *) shift ;;
+  esac
+done
+exec "$@"
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, log
+}
+
+func TestSandboxArgs(t *testing.T) {
+	plain := strings.Join(sandboxArgs("j1", false, false), " ")
+	if plain != "do --sandbox-name j1 -w /" {
+		t.Errorf("plain sandbox: %q", plain)
+	}
+	if strings.Contains(strings.Join(sandboxArgs("j1", true, false), " "), "egress") {
+		t.Error("a sandbox without network was given egress")
+	}
+	if got := strings.Join(sandboxArgs("j1", true, true), " "); got != "do --sandbox-name j1 -w / --write --allow-egress" {
+		t.Errorf("network sandbox: %q", got)
+	}
+}
+
+func TestPoolNetworkJobGetsItsOwnEgressSandbox(t *testing.T) {
+	box, boxLog := fakeBox(t, "")
+	launcher, launchLog := fakeLauncher(t)
+	p := NewPool(launcher, box, "/langs", false, map[string]string{
+		"PATH": os.Getenv("PATH"), "FAKE_LOG": boxLog, "FAKE_MODE": "",
+	})
+	defer p.Close()
+
+	p.Refill()
+	p.mu.Lock()
+	spare := p.spare
+	p.mu.Unlock()
+	if spare == nil {
+		t.Fatal("no spare sandbox after Refill")
+	}
+
+	netJob := job()
+	netJob.Req.Network = &proto.Network{WallMs: 1000, RxKB: 1024, FileKB: 1024}
+	resp, err := p.Run(netJob, 5*time.Second)
+	if err != nil {
+		t.Fatalf("network job: %v", err)
+	}
+	if !resp.Meta.Network || resp.Meta.Warm {
+		t.Errorf("network job: meta says network=%v warm=%v, want true and false", resp.Meta.Network, resp.Meta.Warm)
+	}
+	// The spare has no network and must not have been used for this job.
+	p.mu.Lock()
+	still := p.spare
+	p.mu.Unlock()
+	if still != spare {
+		t.Error("the network job took the spare sandbox")
+	}
+
+	if resp, err = p.Run(job(), 5*time.Second); err != nil {
+		t.Fatalf("ordinary job: %v", err)
+	}
+	if resp.Meta.Network {
+		t.Error("an ordinary job reported network access")
+	}
+
+	data, _ := os.ReadFile(launchLog)
+	egress := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if strings.HasPrefix(line, "do ") && strings.Contains(line, "--allow-egress") {
+			egress++
+		}
+	}
+	if egress != 1 {
+		t.Errorf("want exactly one sandbox with egress, got %d:\n%s", egress, data)
+	}
+}

@@ -1,0 +1,2 @@
+# Extra Debian packages for Haskell, OCaml, Elixir and Erlang, one per line.
+# Example: libghc-vector-dev, libghc-unordered-containers-dev

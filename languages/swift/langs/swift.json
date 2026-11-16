@@ -1,0 +1,27 @@
+{
+  "name": "swift",
+  "title": "Swift (6.4)",
+  "ids": [
+    83
+  ],
+  "source_file": "main.swift",
+  "stack_kb": 262144,
+  "compile": {
+    "cmd": [
+      "swiftc",
+      "-O",
+      "-o",
+      "main",
+      "{options}",
+      "main.swift"
+    ],
+    "cpu_ms": 40000,
+    "wall_ms": 60000
+  },
+  "run": {
+    "cmd": [
+      "./main",
+      "{args}"
+    ]
+  }
+}

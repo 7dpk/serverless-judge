@@ -1,0 +1,26 @@
+{
+  "name": "cpp-clang",
+  "title": "C++ (Clang 19, C++20)",
+  "ids": [
+    76
+  ],
+  "source_file": "main.cpp",
+  "stack_kb": 262144,
+  "compile": {
+    "cmd": [
+      "clang++",
+      "-O2",
+      "-std=gnu++20",
+      "-o",
+      "main",
+      "{options}",
+      "main.cpp"
+    ]
+  },
+  "run": {
+    "cmd": [
+      "./main",
+      "{args}"
+    ]
+  }
+}

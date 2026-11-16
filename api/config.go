@@ -29,7 +29,18 @@ type Config struct {
 	MaxBatch    int
 	GroupSize   int // most tests sent to a runner in one request
 	TTL         time.Duration
+
+	// Network access for submissions that ask for it with enable_network.
+	// Off unless the deployment turns it on.
+	AllowNetwork               bool
+	DefaultNetTime, MaxNetTime float64 // seconds a run may spend waiting on the network
+	MaxDownloadKB              int     // most a run may receive, and the largest file it may write
+	NetCPUUsPerMB              int     // CPU time not counted, per MB received
 }
+
+// Protocol overhead on top of what a program downloads, as counted on the
+// sandbox's network interface: measured at 1 to 7%.
+const netOverheadPct = 8
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
@@ -86,6 +97,19 @@ func loadConfig() *Config {
 		// Six days, not seven: Firestore removes expired documents within
 		// about a day, and nothing may be kept beyond seven.
 		TTL: time.Duration(envInt("SUBMISSION_TTL_HOURS", 144)) * time.Hour,
+
+		AllowNetwork:   os.Getenv("ALLOW_ENABLE_NETWORK") == "1" || os.Getenv("ALLOW_ENABLE_NETWORK") == "true",
+		DefaultNetTime: envFloat("NETWORK_TIME_LIMIT", 30),
+		MaxNetTime:     envFloat("MAX_NETWORK_TIME_LIMIT", 60),
+		MaxDownloadKB:  envInt("MAX_DOWNLOAD_MB", 125) * 1024,
+		// Receiving 1 MB inside a sandbox was measured to cost 6 to 14 ms.
+		NetCPUUsPerMB: int(envFloat("NETWORK_CPU_MS_PER_MB", 15) * 1000),
+	}
+	if c.DefaultNetTime > c.MaxNetTime {
+		c.DefaultNetTime = c.MaxNetTime
+	}
+	if c.AllowNetwork && (c.MaxNetTime <= 0 || c.MaxNetTime > 240 || c.MaxDownloadKB <= 0 || c.MaxDownloadKB > 900*1024 || c.NetCPUUsPerMB < 0) {
+		log.Fatal("network limits are out of range: MAX_NETWORK_TIME_LIMIT must be 1 to 240 seconds and MAX_DOWNLOAD_MB 1 to 900")
 	}
 	for _, t := range strings.Split(os.Getenv("AUTH_TOKENS"), ",") {
 		if t = strings.TrimSpace(t); t != "" {

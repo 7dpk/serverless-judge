@@ -1,0 +1,15 @@
+{
+  "name": "bash",
+  "title": "Bash (5.2)",
+  "ids": [
+    46
+  ],
+  "source_file": "main.sh",
+  "run": {
+    "cmd": [
+      "bash",
+      "main.sh",
+      "{args}"
+    ]
+  }
+}

@@ -56,12 +56,16 @@ say so in the pull request and I'll run the suite myself.
 This is the change I expect most often, so it has its own sections in the
 deploying guide: [adding packages](docs/deploying.md#adding-packages) and
 [adding a language](docs/deploying.md#adding-a-language). The short
-version is that a language is a folder with a Dockerfile and a JSON file
-that says how to compile and run it.
+version is that a language is a JSON file that says how to compile and run
+it, sitting in a folder with a Dockerfile. A language that's rarely asked
+for can share a folder, and so a service, with others.
 
 When you add one, please also add a case for it to `tests/e2e.py` and a
 sample to `api/web/samples.js`, so that it shows up when someone presses
-"Run all" in the playground.
+"Run all" in the playground. The shared images also compile and run one
+small program per language while they're being built (`selftest.sh` in the
+folder, or a step in its Dockerfile), which catches a broken toolchain
+before it's ever deployed, so add a line there too.
 
 ## What I look for in a pull request
 
@@ -77,8 +81,9 @@ sample to `api/web/samples.js`, so that it shows up when someone presses
   that describes it should change with it.
 - **Clean formatting.** `gofmt` and `go vet` for Go, `terraform fmt` for
   Terraform.
-- **No quiet changes to the sandbox defaults.** No network, no
-  credentials and one job per sandbox are the reason this is safe to run.
+- **No quiet changes to the sandbox defaults.** No network unless it's
+  asked for, no credentials and one job per sandbox are the reason this is
+  safe to run.
   A change to any of them needs an issue and a discussion first.
 
 ## Licence

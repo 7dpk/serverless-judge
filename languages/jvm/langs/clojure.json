@@ -1,0 +1,26 @@
+{
+  "name": "clojure",
+  "title": "Clojure (1.12)",
+  "ids": [
+    86
+  ],
+  "source_file": "main.clj",
+  "run": {
+    "cmd": [
+      "java",
+      "@/opt/lang/clojure/run.args",
+      "-Xmx{memory_mb}m",
+      "clojure.main",
+      "main.clj",
+      "{args}"
+    ]
+  },
+  "warmup": {
+    "cmd": [
+      "sh",
+      "-c",
+      "echo '(println 1)' > w.clj && java @/opt/lang/clojure/run.args clojure.main w.clj"
+    ]
+  },
+  "runtime_cpu_ms": 1000
+}

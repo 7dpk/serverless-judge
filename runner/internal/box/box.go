@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"serverless-judge/runner/internal/netstat"
 	"serverless-judge/runner/proto"
 )
 
@@ -47,6 +48,12 @@ const (
 	// much across all of its tests before it is stopped.
 	runDiskKB     = 256 * 1024
 	diskEveryTick = 8
+	// A run with network access: how often to read the receive counter and
+	// the size of the output files, in ticks.
+	netEveryTick = 4
+	// The file limit of such a run is what it may download, so the disk has
+	// to hold that much and a little more.
+	netDiskSlackKB = 64 * 1024
 
 	compileCPUMs  = 20000
 	compileWallMs = 30000
@@ -93,6 +100,12 @@ type step struct {
 	anon     bool // measure anonymous memory rather than everything resident
 	diskKB   int  // cap on filesystem growth since the first test; 0: none
 	env      []string
+	// strictOut marks a test run: more output than outKB is a verdict, not
+	// something to cut off quietly.
+	strictOut bool
+	// Set only for a run with network access (see proto.Network).
+	netRxKB    int // most it may receive; 0: no network
+	netUsPerMB int // CPU credited per MB received
 }
 
 // How a read of /proc/<pid>/smaps ended.
@@ -167,6 +180,16 @@ type outcome struct {
 	stdout, stderr       []byte
 	truncated            bool
 	err                  error
+	netRxKB, creditMs    int // network runs: received, and CPU credited for it
+}
+
+// netCreditMs is the CPU time a run is not charged for having received rxKB
+// over the network.
+func netCreditMs(rxKB, usPerMB int) int {
+	if rxKB <= 0 || usPerMB <= 0 {
+		return 0
+	}
+	return int(int64(rxKB) * int64(usPerMB) / 1024 / 1000)
 }
 
 // Main is the entry point for `judge box`.
@@ -315,23 +338,39 @@ func (b *boxer) test(i int, t proto.Test, vars Vars) proto.TestResult {
 	}
 
 	s := step{
-		argv:     Expand(m.Run.Cmd, vars),
-		stdin:    stdin,
-		hasStdin: hasStdin,
-		cpuMs:    lim.CPUMs,
-		wallMs:   lim.WallMs,
-		memKB:    lim.MemoryKB,
-		outKB:    lim.OutputKB,
-		fsizeKB:  lim.OutputKB,
-		stackKB:  m.StackKB,
-		procs:    lim.Procs,
-		merge:    b.job.Req.MergeStderr,
-		anon:     true,
-		diskKB:   runDiskKB,
-		env:      testEnv,
+		argv:      Expand(m.Run.Cmd, vars),
+		stdin:     stdin,
+		hasStdin:  hasStdin,
+		cpuMs:     lim.CPUMs,
+		wallMs:    lim.WallMs,
+		memKB:     lim.MemoryKB,
+		outKB:     lim.OutputKB,
+		fsizeKB:   lim.OutputKB,
+		stackKB:   m.StackKB,
+		procs:     lim.Procs,
+		merge:     b.job.Req.MergeStderr,
+		anon:      true,
+		diskKB:    runDiskKB,
+		env:       testEnv,
+		strictOut: true,
 	}
 	if m.WallClock {
 		s.cpuMs, s.wallMs = 0, lim.CPUMs
+	} else {
+		s.cpuMs += m.RuntimeCPUMs
+	}
+	// With network access the program may wait on the network for longer
+	// than it may compute, and may write a file as large as it may download.
+	net := b.job.Req.Network
+	if net != nil {
+		s.wallMs += net.WallMs
+		s.netRxKB, s.netUsPerMB = net.RxKB, net.CPUUsPerMB
+		if net.FileKB > s.fsizeKB {
+			s.fsizeKB = net.FileKB
+		}
+		if s.fsizeKB+netDiskSlackKB > s.diskKB {
+			s.diskKB = s.fsizeKB + netDiskSlackKB
+		}
 	}
 	if m.NoMemoryLimit {
 		s.memKB = 0
@@ -345,11 +384,21 @@ func (b *boxer) test(i int, t proto.Test, vars Vars) proto.TestResult {
 		ExitCode: o.exit, Signal: o.signal,
 		Stdout: o.stdout, Stderr: o.stderr,
 		CPUMs: o.cpuMs, WallMs: o.wallMs, MemoryKB: o.memKB,
+		NetRxKB: o.netRxKB,
 	}
 	if m.WallClock {
 		res.CPUMs = o.wallMs
+	} else {
+		// Neither the runtime's own start nor the cost of receiving data
+		// is the program's work.
+		res.CPUMs -= min(m.RuntimeCPUMs, res.CPUMs)
+		res.NetCreditMs = min(o.creditMs, res.CPUMs)
+		res.CPUMs -= res.NetCreditMs
 	}
 	res.Status, res.Message = Verdict(o.err, o.killed, o.exit, o.signal, res.CPUMs, o.memKB, o.truncated, lim.CPUMs, s.memKB)
+	if net != nil && res.Status == proto.StatusOLE && o.signal == int(syscall.SIGXFSZ) {
+		res.Message = "file size limit exceeded"
+	}
 	return res
 }
 
@@ -367,6 +416,10 @@ func Verdict(err error, killed string, exit, signal, timeMs, memKB int, truncate
 		return proto.StatusMLE, "memory limit exceeded"
 	case killed == "disk":
 		return proto.StatusOLE, "disk limit exceeded"
+	case killed == "net":
+		return proto.StatusOLE, "download limit exceeded"
+	case killed == "out":
+		return proto.StatusOLE, "output limit exceeded"
 	case signal == int(syscall.SIGXFSZ) || truncated:
 		return proto.StatusOLE, "output limit exceeded"
 	case signal != 0:
@@ -461,7 +514,9 @@ func (b *boxer) exec(s step) outcome {
 		args = append(args, "-e", errPath)
 	}
 	if s.cpuMs > 0 {
-		args = append(args, "-c", strconv.Itoa((s.cpuMs+999)/1000+1))
+		// The kernel's own CPU limit, as a backstop to the sampler below. A
+		// network run may earn credit up to what its download cap is worth.
+		args = append(args, "-c", strconv.Itoa((s.cpuMs+netCreditMs(s.netRxKB, s.netUsPerMB)+999)/1000+1))
 	}
 	if s.asKB > 0 {
 		args = append(args, "-a", strconv.Itoa(s.asKB))
@@ -510,6 +565,19 @@ func (b *boxer) exec(s step) outcome {
 	if s.diskKB > 0 && b.diskBase < 0 {
 		b.diskBase = diskUsedKB()
 	}
+	// Network runs: what has arrived since the step began. The counter is
+	// the sandbox's own, so it sees every process in it.
+	rxBase, netOK := uint64(0), false
+	if s.netRxKB > 0 {
+		rxBase, netOK = netstat.RxBytes()
+	}
+	rxKB := func() int {
+		if now, ok := netstat.RxBytes(); ok && now > rxBase {
+			return int((now - rxBase) / 1024)
+		}
+		return 0
+	}
+	credit := 0
 loop:
 	for {
 		select {
@@ -539,7 +607,7 @@ loop:
 				switch {
 				case s.wallMs > 0 && wall > s.wallMs:
 					o.killed = "wall"
-				case s.cpuMs > 0 && cpu > s.cpuMs+cpuGraceMs:
+				case s.cpuMs > 0 && cpu > s.cpuMs+credit+cpuGraceMs:
 					o.killed = "cpu"
 				case s.memKB > 0 && known && mem > s.memKB:
 					o.killed = "mem"
@@ -550,6 +618,18 @@ loop:
 				if o.killed == "" && s.diskKB > 0 && ticks%diskEveryTick == 0 && diskUsedKB()-b.diskBase > s.diskKB {
 					o.killed = "disk"
 				}
+				if o.killed == "" && netOK && ticks%netEveryTick == 0 {
+					got := rxKB()
+					credit = netCreditMs(got, s.netUsPerMB)
+					switch {
+					case got > s.netRxKB:
+						o.killed = "net"
+					case s.strictOut && s.fsizeKB > s.outKB && (fileKB(outPath) > s.outKB || (!s.merge && fileKB(errPath) > s.outKB)):
+						// The file limit no longer stops output at the
+						// output limit, so watch for it here.
+						o.killed = "out"
+					}
+				}
 			}
 			if o.killed != "" {
 				b.killOwned()
@@ -557,6 +637,10 @@ loop:
 		}
 	}
 	o.wallMs = int(time.Since(start) / time.Millisecond)
+	if netOK {
+		o.netRxKB = rxKB()
+		o.creditMs = netCreditMs(min(o.netRxKB, s.netRxKB), s.netUsPerMB)
+	}
 
 	rec, ok := readReport(repR)
 	if !ok {
@@ -599,10 +683,19 @@ loop:
 	if !s.merge {
 		o.stderr, t2 = readCapped(errPath, s.outKB)
 	}
-	// Only a run step caps files at the output limit; there a full file
-	// means the program wanted to write more.
-	o.truncated = (t1 || t2) && s.fsizeKB == s.outKB
+	// Only a test run treats a full output file as an error: there it
+	// means the program wanted to write more than it may.
+	o.truncated = (t1 || t2) && s.strictOut
 	return o
+}
+
+// fileKB is a file's size, rounded down, or 0 if it cannot be read.
+func fileKB(path string) int {
+	st, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return int(st.Size() / 1024)
 }
 
 // usage sums memory and CPU over the processes the current step owns.

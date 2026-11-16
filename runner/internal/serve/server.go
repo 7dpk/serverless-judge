@@ -28,6 +28,12 @@ const (
 	// Budget for steps the caller does not control (see box.go).
 	compileBudget = 30 * time.Second
 	hookBudget    = 30 * time.Second
+
+	// Bounds on what a caller may ask for with network access. The API
+	// sets the real limits; these only stop a nonsense request.
+	maxNetWallMs  = 5 * 60 * 1000
+	maxNetKB      = 1 << 20 // 1 GiB, about half of an instance's memory
+	maxNetUsPerMB = 1000 * 1000
 )
 
 type Server struct {
@@ -35,6 +41,9 @@ type Server struct {
 	pool     *Pool
 	env      map[string]string
 	instance string
+	// allowNetwork lets a request ask for a sandbox with network access.
+	// Off unless the service was deployed with JUDGE_ALLOW_NETWORK=1.
+	allowNetwork bool
 }
 
 func getenv(k, def string) string {
@@ -77,6 +86,8 @@ func Main() {
 		pool:     NewPool(sandboxBin, self, langDir, os.Getenv("JUDGE_SANDBOX_WRITE") == "1", env),
 		env:      env,
 		instance: randHex(4),
+
+		allowNetwork: os.Getenv("JUDGE_ALLOW_NETWORK") == "1",
 	}
 	s.pool.Refill() // first sandbox is created during startup, which is billed anyway
 
@@ -205,12 +216,26 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	if lim.Procs <= 0 {
 		lim.Procs = 128
 	}
+	if n := req.Network; n != nil {
+		switch {
+		case !s.allowNetwork:
+			http.Error(w, "network access is not enabled on this runner", http.StatusForbidden)
+			return
+		case n.WallMs < 0 || n.WallMs > maxNetWallMs || n.RxKB <= 0 || n.RxKB > maxNetKB ||
+			n.FileKB < 0 || n.FileKB > maxNetKB || n.CPUUsPerMB < 0 || n.CPUUsPerMB > maxNetUsPerMB:
+			http.Error(w, "network limits are out of range", http.StatusBadRequest)
+			return
+		}
+	}
 
 	// Worst case the supervisor can legitimately take, plus slack. Past this
 	// the sandbox is destroyed from outside.
 	perTest := time.Duration(lim.WallMs) * time.Millisecond
 	if m.WallClock {
 		perTest = time.Duration(lim.CPUMs) * time.Millisecond
+	}
+	if req.Network != nil {
+		perTest += time.Duration(req.Network.WallMs) * time.Millisecond
 	}
 	if m.BeforeRun != nil {
 		perTest += hookBudget
@@ -220,7 +245,8 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 	budget := 10*time.Second + time.Duration(len(req.Tests))*(perTest+time.Second)
 	if m.Compile != nil {
-		budget += compileBudget
+		// A manifest may give its compiler longer than the default.
+		budget += max(compileBudget, time.Duration(m.Compile.WallMs)*time.Millisecond)
 	}
 	if m.Prepare != nil {
 		budget += hookBudget

@@ -41,6 +41,9 @@ type TempToken struct {
 	ExpiresAt time.Time `firestore:"expires_at" json:"expires_at"`
 	Max       int64     `firestore:"max_submissions" json:"max_submissions"`
 	Used      int64     `firestore:"used" json:"used"`
+	// Network lets the token submit with enable_network. Off unless the
+	// admin who made the token asked for it.
+	Network bool `firestore:"network" json:"network"`
 }
 
 func tokenID(token string) string {
@@ -64,6 +67,20 @@ type principal struct {
 	admin   bool
 	tokenID string       // set for temporary tokens
 	entry   *cachedToken // set for temporary tokens
+}
+
+// mayNetwork reports whether the caller may submit with network access: an
+// admin key, or a temporary token that was created with that right.
+func (p principal) mayNetwork() bool {
+	if p.admin {
+		return true
+	}
+	if p.entry == nil {
+		return false
+	}
+	p.entry.mu.Lock()
+	defer p.entry.mu.Unlock()
+	return p.entry.tok.Network
 }
 
 type ctxKey struct{}
@@ -170,7 +187,7 @@ func (a *App) guard(next http.HandlerFunc, adminOnly bool) http.HandlerFunc {
 func (a *App) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
 	p := who(r)
 	if p.admin {
-		writeJSON(w, 200, map[string]any{"role": "admin"})
+		writeJSON(w, 200, map[string]any{"role": "admin", "network": a.cfg.AllowNetwork})
 		return
 	}
 	c := p.entry
@@ -179,6 +196,7 @@ func (a *App) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"role": "temporary", "label": c.tok.Label, "expires_at": c.tok.ExpiresAt,
 		"max_submissions": c.tok.Max, "used": c.tok.Used + c.local,
+		"network": a.cfg.AllowNetwork && c.tok.Network,
 	})
 }
 
@@ -187,6 +205,7 @@ func (a *App) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
 		Label    string  `json:"label"`
 		TTLHours float64 `json:"ttl_hours"`
 		Max      *int64  `json:"max_submissions"`
+		Network  bool    `json:"network"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
 		errorJSON(w, 400, "request body is not valid JSON")
@@ -212,11 +231,15 @@ func (a *App) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 422, "label is too long (maximum is 80 characters)")
 		return
 	}
+	if in.Network && !a.cfg.AllowNetwork {
+		errorJSON(w, 422, "network access is not enabled on this deployment")
+		return
+	}
 	raw := make([]byte, 20)
 	rand.Read(raw)
 	token := tempPrefix + hex.EncodeToString(raw)
 	now := time.Now().UTC()
-	t := TempToken{Label: in.Label, CreatedAt: now, ExpiresAt: now.Add(ttl), Max: max}
+	t := TempToken{Label: in.Label, CreatedAt: now, ExpiresAt: now.Add(ttl), Max: max, Network: in.Network}
 	if _, err := a.store.c.Collection("tokens").Doc(tokenID(token)).Set(r.Context(), t); err != nil {
 		log.Printf(`{"severity":"ERROR","message":"token create: %v"}`, err)
 		errorJSON(w, 503, "could not store the token")
@@ -225,7 +248,7 @@ func (a *App) handleTokenCreate(w http.ResponseWriter, r *http.Request) {
 	// The token is shown once, here. Only its hash is kept.
 	writeJSON(w, 201, map[string]any{
 		"token": token, "id": tokenID(token), "label": t.Label,
-		"expires_at": t.ExpiresAt, "max_submissions": t.Max,
+		"expires_at": t.ExpiresAt, "max_submissions": t.Max, "network": t.Network,
 	})
 }
 

@@ -196,7 +196,11 @@ func (a *App) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"max_processes_and_or_threads":     c.DefaultProcs,
 		"max_max_processes_and_or_threads": c.MaxProcs,
 		"enable_network":                   false,
-		"allow_enable_network":             false,
+		"allow_enable_network":             c.AllowNetwork,
+		// Not in Judge0: the limits that come with enable_network.
+		"network_time_limit":     c.DefaultNetTime,
+		"max_network_time_limit": c.MaxNetTime,
+		"max_download_size":      c.MaxDownloadKB,
 	})
 }
 
@@ -213,7 +217,7 @@ func (a *App) handleCreate(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 400, "request body is not valid JSON")
 		return
 	}
-	sub, errs := a.build(&in, b64, time.Now())
+	sub, errs := a.buildFor(who(r), &in, b64, time.Now())
 	if errs != nil {
 		writeJSON(w, 422, errs)
 		return
@@ -313,7 +317,7 @@ func (a *App) handleCreateBatch(w http.ResponseWriter, r *http.Request) {
 	results := make([]any, n)
 	var valid []*Submission
 	for i := range body.Submissions {
-		sub, errs := a.build(&body.Submissions[i], b64, now)
+		sub, errs := a.buildFor(who(r), &body.Submissions[i], b64, now)
 		if errs != nil {
 			results[i] = errs
 			continue

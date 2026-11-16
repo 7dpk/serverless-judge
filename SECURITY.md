@@ -28,6 +28,8 @@ fix, unless you'd rather not be named.
 
 - A program that reaches the network, the metadata server or any
   credentials when it shouldn't be able to.
+- A run with network access that gets past its download or time limit, or
+  reaches the metadata server or the machine it's running on.
 - A program that sees another submission's code, input or output, or
   changes the verdict of a later one.
 - A program that outlives its sandbox.

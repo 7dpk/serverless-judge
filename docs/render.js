@@ -165,7 +165,7 @@ async function playground(theme) {
     await run();
     await say(2, 'The verdict comes back with run time and memory');
     await sleep(4500);
-    await say(3, 'Same for any of the twelve languages: here, C++');
+    await say(3, 'Same for any of the 37 languages: here, C++');
     await choose('C++');
     await run();
     await sleep(4500);
@@ -174,7 +174,21 @@ async function playground(theme) {
     await press('#runall'); await sleep(300);
     await scrollToAll(14);
     await page.evaluate(() => { document.getElementById('cur').style.transform = 'translate(820px, 300px)'; });
-    await idle('#runall'); await sleep(5500);
+    await idle('#runall'); await sleep(2500);
+    // The list is longer than the window: move down it a little at a time,
+    // slowly enough to read, and stop on the last rows.
+    for (let step = 0; step < 12; step++) {
+      const left = await page.evaluate(() => {
+        const bottom = document.getElementById('alltable').getBoundingClientRect().bottom;
+        const room = window.innerHeight - 76; // the caption bar covers the rest
+        const move = Math.min(220, Math.max(0, bottom - room));
+        if (move > 0) window.scrollBy({ top: move, behavior: 'smooth' });
+        return bottom - room - move;
+      });
+      await sleep(1300);
+      if (left <= 0) break;
+    }
+    await sleep(4000);
     recording = false; await recorder;
 
     const list = frames.map((f, k) => `file '${f.file}'\nduration ${(((frames[k + 1] || { t: f.t + 110 }).t - f.t) / 1000).toFixed(3)}`);

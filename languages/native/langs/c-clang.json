@@ -1,0 +1,29 @@
+{
+  "name": "c-clang",
+  "title": "C (Clang 19, C17)",
+  "ids": [
+    75,
+    104,
+    110
+  ],
+  "source_file": "main.c",
+  "stack_kb": 262144,
+  "compile": {
+    "cmd": [
+      "clang",
+      "-O2",
+      "-std=gnu17",
+      "-o",
+      "main",
+      "{options}",
+      "main.c",
+      "-lm"
+    ]
+  },
+  "run": {
+    "cmd": [
+      "./main",
+      "{args}"
+    ]
+  }
+}

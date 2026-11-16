@@ -20,7 +20,7 @@ It runs on Cloud Run sandboxes, making it extremely secure while requiring virtu
 
 Let me know if you're looking forward to using or improving it. I would like to learn how it's being used and how it can be improved.
 
-Its API is the same as [Judge0](https://ce.judge0.com)'s, it runs every submission in its own secure throwaway sandbox, and it lives entirely on Google Cloud Run. It scales to 0 when not in use, and starting from nothing it has worked through a burst of 1,000 Python submissions in 29 seconds. Once it's warm, it keeps up with about 135 submissions per second on Google's default quota.
+Its API is the same as [Judge0](https://ce.judge0.com)'s, it runs every submission in its own secure throwaway sandbox, and it lives entirely on Google Cloud Run. It scales to 0 when not in use, and starting from nothing it has worked through a burst of 1,000 Python submissions in 29 seconds. Once it's warm, it keeps up with more than 100 submissions per second on Google's default quota.
 
 **Here are the simple five steps to understand it quickly.**
 
@@ -76,15 +76,22 @@ look familiar if you've run Judge0 before.
   only need a new URL and key. There are a few places where it behaves
   differently, and I've
   [written them down](docs/api.md#differences-from-judge0).
-- **Twelve languages.** C, C++, Python, JavaScript, TypeScript, Java, C#,
-  Go, PHP, Rust, PostgreSQL and MySQL. If yours is missing, adding one is
-  a folder with a Dockerfile and a JSON file.
+- **37 languages.** C, C++, Python, JavaScript, TypeScript, Java, C#, Go,
+  PHP, Rust, Kotlin, Swift, Ruby, Scala, Dart, R, Bash, Haskell and more,
+  plus PostgreSQL, MySQL and SQLite. If yours is missing, adding one is a
+  Dockerfile and a JSON file.
 - **A fresh sandbox for every submission.** Each run gets its own gVisor
   sandbox with no network and no credentials, and that sandbox is
   destroyed as soon as the run is over.
+- **Network only if you ask for it.** Some programs need to download a
+  file before they can run, so a deployment can let trusted callers switch
+  the network on for a single submission with `enable_network`. The
+  download is capped in size and in time, and the whole thing is off by
+  default.
 - **Scale to zero.** When there's no traffic, there are no instances. The
-  only thing left on the bill is image storage, which comes to under 20
-  cents a month.
+  only thing left on the bill is image storage, which comes to about 35
+  to 55 cents a month for all 37 languages, or under 20 if you deploy only
+  the first twelve.
 - **Room for bursts.** When more work arrives than the runners can take,
   it queues up while they scale out. In my load test, 20,000 submissions
   sent in two minutes all came back with the right verdict.
@@ -136,7 +143,7 @@ used.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/playground-dark.gif">
-    <img src="docs/playground.gif" width="880" alt="Recording of the playground in four captioned steps: pick a language and press Run; the verdict comes back with run time and memory; the same for C++; then Run all checks all twelve languages and each one comes back Accepted.">
+    <img src="docs/playground.gif" width="880" alt="Recording of the playground in four captioned steps: pick a language and press Run; the verdict comes back with run time and memory; the same for C++; then Run all checks every language, the page moves down the list, and each one comes back Accepted.">
   </picture>
 </p>
 
@@ -181,6 +188,17 @@ already have:
 | TypeScript 7 | 74, 101 | | PostgreSQL 18 | 201 |
 | Java 25 | 62, 91 | | MySQL 8.4 | 202 |
 
+Those twelve are the ones people ask for most, so each has a service of
+its own. Twenty-five more share five services between them:
+
+| | Languages (id) |
+|---|---|
+| Scripting | Ruby 3.3 (72), Perl 5.40 (85), Lua 5.4 (64), Bash 5.2 (46), R 4.5 (80, 99), SQLite 3.46 (82), Plain Text (43) |
+| JVM | Kotlin 2.4 (78, 111), Scala 3.3 (81), Groovy 6.0 (88), Clojure 1.12 (86) |
+| Swift | Swift 6.4 (83) |
+| Functional | Haskell, GHC 9.6 (61), OCaml 5.3 (65), Elixir 1.18 (57), Erlang, OTP 27 (58) |
+| Native | Dart 3.14 (90), Fortran (59), Pascal (67), Objective-C (79), D (56), Assembly, NASM (45), COBOL (77), C with Clang 19 (75, 104, 110), C++ with Clang 19 (76) |
+
 Batches, base64, callbacks, extra files and compiler options work as well.
 The full list is in [docs/api.md](docs/api.md).
 
@@ -194,7 +212,7 @@ There are four pieces and no servers to look after:
   has no way to read the answer.
 - **runner-\<language\>** is one service per toolchain. Each instance
   takes one job at a time and runs it in a sandbox that it throws away
-  afterwards.
+  afterwards. Languages that are asked for less often share a service.
 - **A queue** (Pub/Sub) holds whatever doesn't need an answer right away.
 - **judge-worker** drains that queue. I kept it separate from the API so
   that a backlog can't starve the callers who are waiting on a response.
@@ -219,10 +237,11 @@ a second. A cold start takes roughly 1 to 4 seconds, depending on the
 language.
 
 With Google's default quota of 200 vCPU per region, the ceiling I measured
-is about 135 submissions per second across all twelve languages. Anything
-past that waits in the queue instead of failing: when I sent 20,000
-submissions at 167 per second, every one of them finished with the right
-verdict.
+was about 135 submissions per second. That was across the first twelve
+languages, before the other twenty-five were given a tenth of the quota,
+so expect about 120 now. Anything past that waits in the queue instead of
+failing: when I sent 20,000 submissions at 167 per second, every one of
+them finished with the right verdict.
 
 The numbers, how I measured them, and what to change when you need more
 are in [docs/performance.md](docs/performance.md).
@@ -235,7 +254,7 @@ promised at the top.
 | | You pay for |
 |---|---|
 | While code is running | Cloud Run time on the runner (2 vCPU, 2 GiB) and the API, for as long as the run lasts. A 20,000-submission load test came to about $0.67. |
-| While idle | Image storage: 11 to 18 cents a month. Everything else rounds to zero. |
+| While idle | Image storage: 35 to 55 cents a month with every language, 11 to 18 with the first twelve. Everything else rounds to zero. |
 
 That load test works out to roughly 3 cents per thousand submissions for
 its mix of languages, which should be enough to size your own use case.
@@ -250,6 +269,12 @@ care went:
 - Every program runs in a gVisor sandbox with no network, no metadata
   server, an empty environment and a read-only filesystem apart from an
   in-memory `/tmp`.
+- Network access is something a deployment has to allow and a trusted
+  caller has to ask for, run by run. Such a run gets a sandbox of its own,
+  may download up to 125 MB, and is counted from outside the sandbox as
+  well as inside. It can reach the public internet, so please read
+  [how it's limited](docs/architecture.md#network-access) before you turn
+  it on.
 - There is one job per sandbox and one request per instance, so two
   submissions are never running side by side on the same machine.
 - The runners use a service account with no roles at all, and only the
@@ -269,8 +294,8 @@ The longer explanations live in the `docs` folder:
 
 - [Deploying](docs/deploying.md): Terraform, `deploy.sh`, adding packages
   and languages
-- [API](docs/api.md): endpoints, language ids, differences from Judge0,
-  temporary tokens
+- [API](docs/api.md): endpoints, language ids, network access, differences
+  from Judge0, temporary tokens
 - [Architecture](docs/architecture.md): the parts, safety, data retention,
   known gaps
 - [Performance and capacity](docs/performance.md): timings, the CPU quota,
@@ -285,7 +310,7 @@ so they need its URL and key:
 ```bash
 (cd runner && go test ./...)                 # supervisor logic, sandbox pool
 (cd api && go test ./...)                    # limits, verdicts, grouping, dispatch
-JUDGE_URL=... JUDGE_KEY=... python3 tests/e2e.py       # every language and verdict, live
+JUDGE_URL=... JUDGE_KEY=... python3 tests/e2e.py       # every language, verdict and limit, live
 JUDGE_URL=... JUDGE_KEY=... python3 tests/burst.py 300 # a spike
 JUDGE_URL=... JUDGE_KEY=... go run tests/loadtest/main.go -n 20000 -duration 2m   # sustained load
 ```
@@ -326,8 +351,10 @@ A few things you should know before relying on it:
   document. Callers using `wait=true` still get all of it.
 - Admin keys have no rate limit. Temporary tokens have a cap on
   submissions, but no rate limit either.
-- Instance caps are per language, so a spike in one language can't borrow
-  the capacity another isn't using.
+- Instance caps are per service, so a spike in one language can't borrow
+  the capacity another isn't using. For a big drive in a single language,
+  you can raise its cap for the day
+  ([how](docs/performance.md#one-language-many-people)).
 
 The longer list is in
 [docs/architecture.md](docs/architecture.md#known-gaps).

@@ -61,6 +61,30 @@ SUM = {
     "go": (60, 'package main\nimport "fmt"\nfunc main() { var a, b int64; fmt.Scan(&a, &b); fmt.Println(a + b) }'),
     "php": (68, '<?php\nfscanf(STDIN, "%d %d", $a, $b);\necho $a + $b, "\\n";'),
     "rust": (73, 'use std::io::*;\nfn main() { let mut s = String::new(); stdin().read_to_string(&mut s).unwrap(); let v: Vec<i64> = s.split_whitespace().map(|x| x.parse().unwrap()).collect(); println!("{}", v[0] + v[1]); }'),
+    # The languages that share a service with others (script, jvm, swift,
+    # functional, native).
+    "ruby": (72, "a, b = gets.split.map(&:to_i)\nputs a + b"),
+    "perl": (85, 'my ($a, $b) = split " ", <STDIN>;\nprint $a + $b, "\\n";'),
+    "lua": (64, 'local a, b = io.read("n", "n")\nprint(a + b)'),
+    "bash": (46, "read a b\necho $((a + b))"),
+    "r": (80, 'x <- scan(file("stdin"), quiet = TRUE)\ncat(sum(x), "\\n", sep = "")'),
+    "kotlin": (78, 'fun main() {\n    val (a, b) = readLine()!!.split(" ").map { it.toLong() }\n    println(a + b)\n}'),
+    "scala": (81, 'object Main {\n  def main(args: Array[String]): Unit = {\n    val Array(a, b) = scala.io.StdIn.readLine().split(" ").map(_.toLong)\n    println(a + b)\n  }\n}'),
+    "groovy": (88, 'def (a, b) = System.in.newReader().readLine().split(" ")*.toLong()\nprintln(a + b)'),
+    "clojure": (86, "(require '[clojure.string :as str])\n(let [[a b] (map #(Long/parseLong %) (str/split (read-line) #\" \"))]\n  (println (+ a b)))"),
+    "swift": (83, 'let p = readLine()!.split(separator: " ").map { Int($0)! }\nprint(p[0] + p[1])'),
+    "haskell": (61, "main :: IO ()\nmain = do\n  [a, b] <- map read . words <$> getLine :: IO [Integer]\n  print (a + b)"),
+    "ocaml": (65, 'let () = Scanf.scanf " %d %d" (fun a b -> Printf.printf "%d\\n" (a + b))'),
+    "elixir": (57, "[a, b] = IO.read(:stdio, :line) |> String.split() |> Enum.map(&String.to_integer/1)\nIO.puts(a + b)"),
+    "erlang": (58, 'main(_) ->\n    {ok, [A, B]} = io:fread("", "~d ~d"),\n    io:format("~p~n", [A + B]).'),
+    "dart": (90, "import 'dart:io';\nvoid main() {\n  final p = stdin.readLineSync()!.split(' ').map(int.parse).toList();\n  print(p[0] + p[1]);\n}"),
+    "fortran": (59, 'program s\n  integer(8) :: a, b\n  read(*,*) a, b\n  print "(I0)", a + b\nend program s'),
+    "pascal": (67, "var a, b: int64;\nbegin\n  readln(a, b);\n  writeln(a + b);\nend."),
+    "objective-c": (79, '#import <Foundation/Foundation.h>\nint main(void) {\n  @autoreleasepool {\n    long a, b;\n    scanf("%ld %ld", &a, &b);\n    NSNumber *sum = @(a + b);\n    printf("%s\\n", [[sum stringValue] UTF8String]);\n  }\n  return 0;\n}'),
+    "d": (56, 'import std.stdio;\nvoid main() { long a, b; readf(" %d %d", &a, &b); writeln(a + b); }'),
+    "cobol": (77, "IDENTIFICATION DIVISION.\nPROGRAM-ID. S.\nDATA DIVISION.\nWORKING-STORAGE SECTION.\n01 L PIC X(40).\n01 A PIC 9(9).\n01 B PIC 9(9).\n01 R PIC Z(9)9.\nPROCEDURE DIVISION.\n    ACCEPT L.\n    UNSTRING L DELIMITED BY SPACE INTO A B.\n    COMPUTE R = A + B.\n    DISPLAY FUNCTION TRIM(R).\n    STOP RUN."),
+    "c-clang": (75, '#include <stdio.h>\nint main(){long a,b; scanf("%ld %ld",&a,&b); printf("%ld\\n",a+b); return 0;}'),
+    "cpp-clang": (76, '#include <bits/stdc++.h>\nusing namespace std;\nint main(){long long a,b; cin>>a>>b; cout<<a+b<<"\\n";}'),
 }
 
 FIXTURE = "CREATE TABLE emp (id INT PRIMARY KEY, name VARCHAR(20), dept VARCHAR(20), salary INT);\n" \
@@ -80,6 +104,26 @@ def case(name, lang_id, src, expect, stdin="", expected_output=None, check=None,
 
 for lang, (lid, src) in SUM.items():
     case(f"{lang}/sum", lid, src, ACCEPTED, stdin="20 22\n", expected_output="42\n")
+
+# Languages with no useful stdin: a query, a file that is its own output, and
+# a program that writes with system calls.
+case("sqlite/query", 82, "CREATE TABLE t (n INT);\nINSERT INTO t VALUES (20), (22);\nSELECT SUM(n) FROM t;", ACCEPTED, expected_output="42")
+case("sqlite/syntax-error", 82, "SELEC 1;", NZEC)
+case("text/echo", 43, "42\n", ACCEPTED, expected_output="42")
+case("assembly/write", 45, 'global _start\nsection .text\n_start:\n  mov rax, 1\n  mov rdi, 1\n  mov rsi, msg\n  mov rdx, 3\n  syscall\n  mov rax, 60\n  xor rdi, rdi\n  syscall\nsection .data\nmsg: db "42", 10\n', ACCEPTED, expected_output="42")
+
+# One compile error, one run-time error and one endless loop from each of
+# the shared services.
+case("kotlin/compile-error", 78, "fun main() { val x: Int = \"s\" }", COMPILE)
+case("swift/compile-error", 83, 'let x: Int = "s"', COMPILE)
+case("haskell/compile-error", 61, 'main :: IO ()\nmain = putStrLn (1 :: Int)', COMPILE)
+case("dart/compile-error", 90, "void main() { int x = 's'; }", COMPILE)
+case("ruby/exception", 72, "exit 3", NZEC, check=lambda r: r.get("exit_code") == 3 or "exit_code should be 3")
+case("ruby/time-limit", 72, "loop { }", TLE)
+case("kotlin/time-limit", 78, "fun main() { var x = 0L; while (true) x++ }", TLE)
+case("swift/time-limit", 83, "var x = 0\nwhile true { x &+= 1 }", TLE)
+case("elixir/time-limit", 57, "defmodule L do\n  def spin(n), do: spin(n + 1)\nend\nL.spin(0)", TLE)
+case("fortran/time-limit", 59, "program l\n  integer(8), volatile :: x\n  x = 0\n  do\n    x = x + 1\n  end do\nend program l", TLE)
 
 # A correct program with the wrong expected output must not pass.
 case("python/wrong-answer", 71, SUM["python"][1], WRONG, stdin="1 2", expected_output="4")
@@ -142,6 +186,10 @@ def run_cases(filters):
         if filters and not any(f in name for f in filters):
             continue
         code, r, t = http("POST", "/submissions?wait=true&fields=*", body)
+        if code == 422 and isinstance(r, dict) and "doesn't exist" in " ".join(r.get("language_id", [])):
+            # A copy of the judge may deploy only some language services.
+            print(f"{name:<28} skipped: language {body['language_id']} is not deployed here")
+            continue
         if code != 201 or not r:
             print(f"{name:<28} HTTP {code}: {str(r)[:90]}")
             failed += 1
@@ -226,6 +274,7 @@ def check_api():
     expect("batch outputs line up with their inputs", outs == [str(2 * i) for i in range(1, 7)], outs)
 
     failed += check_tokens_and_dashboard(expect)
+    check_network(expect)
     return failed
 
 
@@ -294,6 +343,78 @@ def check_tokens_and_dashboard(expect):
     code, r, _ = http("GET", "/admin/stats?range=90d")
     expect("analytics: 90 daily buckets", code == 200 and len(r["buckets"]) == 90, code)
     return 0
+
+
+# A file on a host that is unlikely to go away, 69 MB.
+NET_FILE = "https://dl.google.com/go/go1.22.0.linux-amd64.tar.gz"
+NET_FETCH = """
+import sys, time, urllib.request
+times, total = int(sys.argv[1]), 0
+for _ in range(times):
+    r = urllib.request.urlopen(%r, timeout=50)
+    while True:
+        chunk = r.read(1 << 16)
+        if not chunk: break
+        total += len(chunk)
+print(total // 1000000, "MB")
+""" % NET_FILE
+NET_PING = "import urllib.request\nprint(urllib.request.urlopen(%r, timeout=10).status)" % (NET_FILE + ".sha256")
+NET_FIELDS = "/submissions?wait=true&fields=status,stdout,stderr,message,time,wall_time,enable_network,network_time_limit"
+
+
+def check_network(expect):
+    """enable_network: off unless the deployment allows it, and limited when it does."""
+    code, cfg, _ = http("GET", "/config_info")
+    allowed = bool((cfg or {}).get("allow_enable_network"))
+    ask = {"language_id": 71, "source_code": NET_PING, "enable_network": True}
+
+    if not allowed:
+        code, r, _ = http("POST", NET_FIELDS, ask)
+        ok = code == 201 and r["status"]["id"] == NZEC and r["enable_network"] is False
+        expect("network is off here: enable_network is ignored, the run has none", ok, (code, r))
+        code, r, _ = http("POST", "/admin/tokens", {"label": "e2e net", "ttl_hours": 1, "network": True})
+        expect("network is off here: no token can be given it (422)", code == 422, (code, r))
+        return
+
+    code, r, _ = http("POST", NET_FIELDS, {**ask, "expected_output": "200"})
+    ok = code == 201 and r["status"]["id"] == ACCEPTED and r["enable_network"] is True and r["network_time_limit"] is not None
+    expect("network: a run that asks for it can fetch a URL", ok, (code, r))
+    code, r, _ = http("POST", NET_FIELDS, {"language_id": 71, "source_code": NET_PING})
+    expect("network: a run that does not ask has none", code == 201 and r["status"]["id"] == NZEC and r["enable_network"] is False, (code, r))
+
+    limit_mb = (cfg.get("max_download_size") or 0) // 1024
+    fits = max(1, min(limit_mb // 69, 1))
+    over = limit_mb // 69 + 2
+    if limit_mb >= 69:
+        code, r, _ = http("POST", NET_FIELDS, {**ask, "source_code": NET_FETCH, "command_line_arguments": str(fits), "expected_output": "68 MB"})
+        ok = code == 201 and r["status"]["id"] == ACCEPTED and float(r["time"]) < 0.5
+        expect(f"network: a 69 MB download passes and is not charged as CPU time ({r.get('time')} s)", ok, (code, r))
+    code, r, _ = http("POST", NET_FIELDS, {**ask, "source_code": NET_FETCH, "command_line_arguments": str(over)})
+    ok = code == 201 and r["status"]["id"] == XFSZ and "download limit" in (r.get("message") or "")
+    expect(f"network: downloading {over * 69} MB is stopped at the {limit_mb} MB limit", ok, (code, r))
+
+    code, r, _ = http("POST", NET_FIELDS, {**ask, "source_code": "import time\ntime.sleep(8)\nprint('late')", "network_time_limit": 5, "expected_output": "late"})
+    expect("network: waiting is allowed for wall time plus network time (8 s of 10)", code == 201 and r["status"]["id"] == ACCEPTED, (code, r))
+    code, r, _ = http("POST", NET_FIELDS, {**ask, "source_code": "import time\ntime.sleep(30)", "network_time_limit": 3})
+    ok = code == 201 and r["status"]["id"] == TLE and 7.5 < float(r["wall_time"]) < 9.5
+    expect(f"network: and no longer (stopped after {r.get('wall_time')} s of 8)", ok, (code, r))
+    code, r, _ = http("POST", NET_FIELDS, {**ask, "source_code": "while True: pass"})
+    expect("network: the CPU limit still applies", code == 201 and r["status"]["id"] == TLE and float(r["time"]) < 2.5, (code, r))
+    code, r, _ = http("POST", NET_FIELDS, {**ask, "network_time_limit": (cfg.get("max_network_time_limit") or 60) + 1})
+    expect("network: network_time_limit above the maximum is rejected (422)", code == 422 and "network_time_limit" in (r or {}), (code, r))
+
+    code, r, _ = http("POST", "/admin/tokens", {"label": "e2e net plain", "ttl_hours": 1, "max_submissions": 3})
+    plain = (r or {}).get("token", "")
+    code, r, _ = http("POST", "/admin/tokens", {"label": "e2e net granted", "ttl_hours": 1, "max_submissions": 3, "network": True})
+    granted = (r or {}).get("token", "")
+    code, r, _ = http_as(plain, "POST", NET_FIELDS, ask)
+    expect("network: a temporary token without the right is refused (422)", code == 422 and "enable_network" in (r or {}), (code, r))
+    code, r, _ = http_as(granted, "POST", NET_FIELDS, ask)
+    expect("network: a temporary token created with the right may use it", code == 201 and r["status"]["id"] == ACCEPTED, (code, r))
+    code, rows, _ = http("GET", "/admin/tokens")
+    for t in rows or []:
+        if t.get("label", "").startswith("e2e net"):
+            http("DELETE", "/admin/tokens/" + t["id"])
 
 
 def poll(tokens, timeout=120):

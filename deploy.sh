@@ -37,6 +37,15 @@ G=(gcloud --project "$PROJECT" --quiet)
 # start instances: callers then get Cloud Run's HTTP 500 page. So the caps
 # must fit, with room kept for the API and for rollouts.
 QUOTA_VCPU="${QUOTA_VCPU:-200}"
+
+# Network access for submissions that ask for it with enable_network. Off
+# unless ALLOW_NETWORK=1: no sandbox then has a network. Set it for every
+# deploy.sh command of a copy that should have it, as the runners and the API
+# each keep their own switch.
+ALLOW_NETWORK="${ALLOW_NETWORK:-0}"
+NETWORK_TIME_LIMIT="${NETWORK_TIME_LIMIT:-30}"
+MAX_NETWORK_TIME_LIMIT="${MAX_NETWORK_TIME_LIMIT:-60}"
+MAX_DOWNLOAD_MB="${MAX_DOWNLOAD_MB:-125}"
 API_MAX_INSTANCES="${API_MAX_INSTANCES:-6}"
 WORKER_MAX_INSTANCES="${WORKER_MAX_INSTANCES:-8}"
 ROLLOUT_RESERVE_VCPU=6
@@ -253,6 +262,7 @@ deploy_family() {
     --concurrency 1 --timeout 300 --cpu-boost \
     --min-instances "$(json_get "$cfg" min_instances 0)" \
     --max-instances "$(json_get "$cfg" max_instances 50)" \
+    --set-env-vars "JUDGE_ALLOW_NETWORK=$ALLOW_NETWORK" \
     --labels app=serverless-judge >/dev/null
   # Cloud Run keeps refusing a caller for about a minute after it has been
   # granted access (62 to 70 s when measured). Registering the language is
@@ -306,6 +316,8 @@ cmd_api() {
   local image="$REPO/judge-api:$(hash_of api runner/proto runner/go.mod)"
   build "$image" . api/Dockerfile ""
   local env="PROJECT_ID=$PROJECT,FIRESTORE_DB=$DB,QUEUE_TOPIC=$TOPIC"
+  env="$env,ALLOW_ENABLE_NETWORK=$ALLOW_NETWORK,NETWORK_TIME_LIMIT=$NETWORK_TIME_LIMIT"
+  env="$env,MAX_NETWORK_TIME_LIMIT=$MAX_NETWORK_TIME_LIMIT,MAX_DOWNLOAD_MB=$MAX_DOWNLOAD_MB"
 
   settle_logs
   say "deploying judge-worker"

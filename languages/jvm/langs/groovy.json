@@ -1,0 +1,39 @@
+{
+  "name": "groovy",
+  "title": "Groovy (6.0)",
+  "ids": [
+    88
+  ],
+  "source_file": "main.groovy",
+  "env": {
+    "JAVA_OPTS": "-XX:+UseSerialGC -XX:TieredStopAtLevel=1"
+  },
+  "compile": {
+    "cmd": [
+      "groovyc",
+      "-d",
+      ".",
+      "{options}",
+      "main.groovy"
+    ],
+    "cpu_ms": 40000,
+    "wall_ms": 60000
+  },
+  "run": {
+    "cmd": [
+      "java",
+      "@/opt/lang/groovy/run.args",
+      "-Xmx{memory_mb}m",
+      "main",
+      "{args}"
+    ]
+  },
+  "warmup": {
+    "cmd": [
+      "sh",
+      "-c",
+      "echo 'println 1' > w.groovy && groovyc -d . w.groovy && java @/opt/lang/groovy/run.args w"
+    ]
+  },
+  "runtime_cpu_ms": 1500
+}

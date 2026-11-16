@@ -12,3 +12,10 @@ project = "my-project-id"
 
 # Run a second copy in the same project:
 # name_prefix = "staging-"
+
+# Let submissions ask for network access with enable_network. Off by
+# default. Read docs/architecture.md#network-access before turning it on.
+# allow_network          = true
+# network_time_limit     = 30    # seconds, added to the wall time limit
+# max_network_time_limit = 60
+# max_download_mb        = 125

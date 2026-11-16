@@ -180,6 +180,15 @@ func (a *App) execute(ctx context.Context, subs []*Submission, patience time.Dur
 			OutputKB: first.FileKB, Procs: first.Procs,
 		},
 	}
+	if first.Network {
+		c := a.cfg
+		req.Network = &proto.Network{
+			WallMs:     first.NetMs,
+			RxKB:       c.MaxDownloadKB + c.MaxDownloadKB*netOverheadPct/100 + 1024,
+			FileKB:     c.MaxDownloadKB,
+			CPUUsPerMB: c.NetCPUUsPerMB,
+		}
+	}
 	if len(first.Files) > 0 {
 		req.Files, _ = unzip(first.Files)
 	}
@@ -226,6 +235,15 @@ func (a *App) execute(ctx context.Context, subs []*Submission, patience time.Dur
 	m := resp.Meta
 	for _, s := range subs {
 		s.timing = runTiming{rpcMs: rpcMs, runnerMs: m.TotalMs, boxMs: m.BoxMs, waitMs: m.SandboxWaitMs, warm: m.Warm}
+	}
+	if first.Network {
+		rx, credit := 0, 0
+		if len(resp.Tests) > 0 {
+			rx, credit = resp.Tests[0].NetRxKB, resp.Tests[0].NetCreditMs
+		}
+		log.Printf(`{"message":"run","language":%q,"tests":%d,"status":%d,"rpc_ms":%d,"runner_ms":%d,"box_ms":%d,"sandbox_wait_ms":%d,"warm":%t,"instance":%q,"network":true,"net_rx_kb":%d,"net_credit_ms":%d,"host_rx_kb":%d}`,
+			lang.Lang, len(subs), first.StatusID, rpcMs, m.TotalMs, m.BoxMs, m.SandboxWaitMs, m.Warm, m.Instance, rx, credit, m.HostRxKB)
+		return nil
 	}
 	log.Printf(`{"message":"run","language":%q,"tests":%d,"status":%d,"rpc_ms":%d,"runner_ms":%d,"box_ms":%d,"sandbox_wait_ms":%d,"warm":%t,"instance":%q}`,
 		lang.Lang, len(subs), first.StatusID, rpcMs, m.TotalMs, m.BoxMs, m.SandboxWaitMs, m.Warm, m.Instance)

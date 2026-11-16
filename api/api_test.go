@@ -647,3 +647,98 @@ func TestLanguageMissRechecksRegistry(t *testing.T) {
 		t.Fatalf("unknown ids forced %d extra reads", reads-2)
 	}
 }
+
+func netApp() *App {
+	a := testApp()
+	a.cfg.AllowNetwork, a.cfg.DefaultNetTime, a.cfg.MaxNetTime = true, 30, 60
+	a.cfg.MaxDownloadKB, a.cfg.NetCPUUsPerMB = 125*1024, 15000
+	return a
+}
+
+func TestNetworkIsIgnoredUnlessTheDeploymentAllowsIt(t *testing.T) {
+	a := testApp() // network not allowed, as deployed by default
+	s, errs := a.buildFor(principal{admin: true}, input(t, `{"source_code":"x","language_id":71,"enable_network":true,"network_time_limit":45}`), false, time.Now())
+	if errs != nil {
+		t.Fatalf("a request for network must be ignored, not refused, where it is off: %v", errs)
+	}
+	if s.Network || s.NetMs != 0 {
+		t.Errorf("network was switched on by a caller on a deployment that does not allow it: %+v", s)
+	}
+	if got := a.render(s, []string{"enable_network", "network_time_limit"}, false); got["enable_network"] != false || got["network_time_limit"] != nil {
+		t.Errorf("render: %v", got)
+	}
+}
+
+func TestNetworkLimits(t *testing.T) {
+	a := netApp()
+	admin := principal{admin: true}
+
+	s, errs := a.buildFor(admin, input(t, `{"source_code":"x","language_id":71}`), false, time.Now())
+	if errs != nil || s.Network {
+		t.Fatalf("network must stay off unless asked for: %+v %v", s, errs)
+	}
+	s, errs = a.buildFor(admin, input(t, `{"source_code":"x","language_id":71,"enable_network":true}`), false, time.Now())
+	if errs != nil || !s.Network || s.NetMs != 30000 {
+		t.Fatalf("default network time: %+v %v", s, errs)
+	}
+	if s.WallMs != 5000 || s.CPUMs != 2000 || s.FileKB != 1024 {
+		t.Errorf("network must not change the other limits: wall=%d cpu=%d file=%d", s.WallMs, s.CPUMs, s.FileKB)
+	}
+	s, errs = a.buildFor(admin, input(t, `{"source_code":"x","language_id":71,"enable_network":"true","network_time_limit":"60"}`), false, time.Now())
+	if errs != nil || s.NetMs != 60000 {
+		t.Fatalf("network time at the cap: %+v %v", s, errs)
+	}
+	if got := a.render(s, []string{"enable_network", "network_time_limit"}, false); got["enable_network"] != true || got["network_time_limit"] != "60.000" {
+		t.Errorf("render: %v", got)
+	}
+	for _, body := range []string{
+		`{"source_code":"x","language_id":71,"enable_network":true,"network_time_limit":61}`,
+		`{"source_code":"x","language_id":71,"enable_network":true,"network_time_limit":0}`,
+		`{"source_code":"x","language_id":71,"enable_network":true,"network_time_limit":"soon"}`,
+	} {
+		if _, errs := a.buildFor(admin, input(t, body), false, time.Now()); len(errs["network_time_limit"]) == 0 {
+			t.Errorf("%s: want a network_time_limit error, got %v", body, errs)
+		}
+	}
+}
+
+func TestNetworkNeedsAKeyThatMayUseIt(t *testing.T) {
+	a := netApp()
+	body := `{"source_code":"x","language_id":71,"enable_network":true}`
+
+	plain := tempPrincipal(5, 0, time.Now().Add(time.Hour))
+	if _, errs := a.buildFor(plain, input(t, body), false, time.Now()); len(errs["enable_network"]) == 0 {
+		t.Errorf("a temporary token without the right was given network access: %v", errs)
+	}
+	// The same token can still submit without it.
+	if s, errs := a.buildFor(plain, input(t, `{"source_code":"x","language_id":71}`), false, time.Now()); errs != nil || s.Network {
+		t.Errorf("ordinary submission from a temporary token: %+v %v", s, errs)
+	}
+	granted := tempPrincipal(5, 0, time.Now().Add(time.Hour))
+	granted.entry.tok.Network = true
+	if s, errs := a.buildFor(granted, input(t, body), false, time.Now()); errs != nil || !s.Network {
+		t.Errorf("a token created with network access was refused: %v", errs)
+	}
+	if (principal{}).mayNetwork() {
+		t.Error("a caller that is nobody may not use the network")
+	}
+}
+
+func TestNetworkSubmissionsAreNeverGrouped(t *testing.T) {
+	a := netApp()
+	body := `{"source_code":"x","language_id":71,"enable_network":true}`
+	s1, _ := a.buildFor(principal{admin: true}, input(t, body), false, time.Now())
+	s2, _ := a.buildFor(principal{admin: true}, input(t, body), false, time.Now())
+	if s1.Group == s2.Group {
+		t.Error("two network submissions of the same program share a group, so they would share a sandbox")
+	}
+	if got := groupTokens([]*Submission{s1, s2}, 25); len(got) != 2 {
+		t.Errorf("want 2 groups, got %v", got)
+	}
+	// Without network the same two are one group, as before.
+	p1, _ := a.buildFor(principal{admin: true}, input(t, `{"source_code":"x","language_id":71}`), false, time.Now())
+	p2, _ := a.buildFor(principal{admin: true}, input(t, `{"source_code":"x","language_id":71}`), false, time.Now())
+	if p1.Group != p2.Group || p1.Group == s1.Group {
+		t.Error("ordinary submissions of one program must still share a group, apart from network ones")
+	}
+}

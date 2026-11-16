@@ -1,0 +1,34 @@
+{
+  "name": "scala",
+  "title": "Scala (3.3)",
+  "ids": [
+    81
+  ],
+  "source_file": "Main.scala",
+  "env": {
+    "JAVA_OPTS": "-XX:+UseSerialGC -XX:TieredStopAtLevel=1"
+  },
+  "compile": {
+    "cmd": [
+      "scalac",
+      "-d",
+      ".",
+      "{options}",
+      "Main.scala"
+    ],
+    "cpu_ms": 40000,
+    "wall_ms": 60000
+  },
+  "run": {
+    "cmd": [
+      "java",
+      "-XX:+UseSerialGC",
+      "-Xss64m",
+      "-Xmx{memory_mb}m",
+      "-cp",
+      ".:/opt/lang/scala/lib/*",
+      "Main",
+      "{args}"
+    ]
+  }
+}

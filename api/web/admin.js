@@ -376,7 +376,7 @@ async function loadTokens() {
       });
       const spent = t.used >= t.max_submissions;
       return [t.label || "(no label)", new Date(t.created_at).toLocaleString(), new Date(t.expires_at).toLocaleString(),
-        num(t.used), num(t.max_submissions), t.expired ? "Expired" : spent ? "Used up" : "Active", revoke];
+        num(t.used), num(t.max_submissions), (t.expired ? "Expired" : spent ? "Used up" : "Active") + (t.network ? ", network" : ""), revoke];
     }), [3, 4]));
 }
 
@@ -384,7 +384,10 @@ async function createToken() {
   $("terr").textContent = "";
   const res = await api("/admin/tokens", {
     method: "POST",
-    body: JSON.stringify({ label: $("tlabel").value.trim(), ttl_hours: Number($("tttl").value), max_submissions: Number($("tmax").value) }),
+    body: JSON.stringify({
+      label: $("tlabel").value.trim(), ttl_hours: Number($("tttl").value), max_submissions: Number($("tmax").value),
+      network: !$("tnetbox").hidden && $("tnet").value === "1",
+    }),
   });
   if (res.status !== 201) {
     $("terr").textContent = (res.body && res.body.error) || "Could not create the token.";
@@ -418,6 +421,8 @@ async function start() {
   $("gate").hidden = true;
   $("signout").hidden = false;
   $("who").textContent = "Signed in with an admin key";
+  // Offered only where the deployment allows network access at all.
+  $("tnetbox").hidden = !me.body.network;
   SECTIONS.forEach((id) => { $(id).hidden = false; });
   load();
   loadTokens();

@@ -1,0 +1,26 @@
+{
+  "name": "elixir",
+  "title": "Elixir (1.18)",
+  "ids": [
+    57
+  ],
+  "source_file": "main.exs",
+  "env": {
+    "ERL_AFLAGS": "+JMsingle true +sbwt none +sbwtdcpu none +sbwtdio none"
+  },
+  "run": {
+    "cmd": [
+      "elixir",
+      "main.exs",
+      "{args}"
+    ]
+  },
+  "warmup": {
+    "cmd": [
+      "sh",
+      "-c",
+      "echo 'defmodule W do\n  def f, do: 1\nend\nIO.puts(W.f())' > w.exs && elixir w.exs"
+    ]
+  },
+  "runtime_cpu_ms": 1000
+}

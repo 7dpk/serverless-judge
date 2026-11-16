@@ -1,0 +1,14 @@
+{
+  "name": "text",
+  "title": "Plain Text",
+  "ids": [
+    43
+  ],
+  "source_file": "main.txt",
+  "run": {
+    "cmd": [
+      "cat",
+      "main.txt"
+    ]
+  }
+}

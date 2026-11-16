@@ -1,0 +1,30 @@
+{
+  "name": "ocaml",
+  "title": "OCaml (5.3)",
+  "ids": [
+    65
+  ],
+  "source_file": "main.ml",
+  "stack_kb": 262144,
+  "compile": {
+    "cmd": [
+      "ocamlopt",
+      "-I",
+      "+str",
+      "-I",
+      "+unix",
+      "-o",
+      "main",
+      "{options}",
+      "str.cmxa",
+      "unix.cmxa",
+      "main.ml"
+    ]
+  },
+  "run": {
+    "cmd": [
+      "./main",
+      "{args}"
+    ]
+  }
+}

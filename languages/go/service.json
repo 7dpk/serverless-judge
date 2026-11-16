@@ -1,1 +1,1 @@
-{"cpu": "2", "memory": "2Gi", "max_instances": 6, "min_instances": 0}
+{"cpu": "2", "memory": "2Gi", "max_instances": 5, "min_instances": 0}

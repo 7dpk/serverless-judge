@@ -54,6 +54,14 @@ type Manifest struct {
 	// limit plus AddressSpaceExtraKB. Only suitable for native code.
 	AddressSpace        bool `json:"address_space,omitempty"`
 	AddressSpaceExtraKB int  `json:"address_space_extra_kb,omitempty"`
+
+	// RuntimeCPUMs is CPU time the language's own runtime spends starting
+	// and stopping, measured in a sandbox for a program that does nothing.
+	// It is added to a test's CPU limit and taken off the time reported, so
+	// that a language with a slow start is judged on the program's work.
+	// Set only where the start is a large part of the limit (the Erlang VM,
+	// Clojure, Groovy); no effect on wall-clock languages.
+	RuntimeCPUMs int `json:"runtime_cpu_ms,omitempty"`
 }
 
 // Limits apply to each test's run step.
@@ -69,6 +77,19 @@ type Test struct {
 	Stdin []byte `json:"stdin,omitempty"`
 }
 
+// Network asks for a sandbox that can reach the internet, and carries the
+// limits that come with that. Without it a sandbox has no network at all,
+// which is the default.
+type Network struct {
+	WallMs int `json:"wall_ms"` // added to each test's wall limit, for time spent waiting on the network
+	RxKB   int `json:"rx_kb"`   // most a test may receive over the network
+	FileKB int `json:"file_kb"` // largest file a test may write, in place of the output limit
+	// Receiving data costs CPU that is not the program's own work. This
+	// much is added to the CPU limit, and taken off the reported time, for
+	// every MB received.
+	CPUUsPerMB int `json:"cpu_us_per_mb"`
+}
+
 // RunRequest is what the API sends to a runner: one program, many inputs.
 type RunRequest struct {
 	Language        string            `json:"language"`
@@ -79,6 +100,7 @@ type RunRequest struct {
 	Limits          Limits            `json:"limits"`
 	Tests           []Test            `json:"tests"`
 	MergeStderr     bool              `json:"merge_stderr,omitempty"`
+	Network         *Network          `json:"network,omitempty"`
 }
 
 // Phase is the outcome of a compile or prepare step.
@@ -113,6 +135,9 @@ type TestResult struct {
 	WallMs   int    `json:"wall_ms"`
 	MemoryKB int    `json:"memory_kb"`
 	Message  string `json:"message,omitempty"`
+	// Set only for a run with network access.
+	NetRxKB     int `json:"net_rx_kb,omitempty"`     // received over the network
+	NetCreditMs int `json:"net_credit_ms,omitempty"` // CPU time not counted because of it
 }
 
 type Meta struct {
@@ -121,6 +146,8 @@ type Meta struct {
 	BoxMs         int    `json:"box_ms"`          // time inside the sandbox
 	TotalMs       int    `json:"total_ms"`        // whole request on the runner
 	Instance      string `json:"instance,omitempty"`
+	Network       bool   `json:"network,omitempty"`    // the sandbox had network access
+	HostRxKB      int    `json:"host_rx_kb,omitempty"` // received by the whole instance meanwhile
 }
 
 type RunResponse struct {

@@ -1,4 +1,1 @@
-{
-  "cpu": "2", "memory": "2Gi", "max_instances": 6, "min_instances": 0,
-  "prebuild": {"dockerfile": "build.Dockerfile", "inputs": ["build.Dockerfile", "postgresql.conf"], "machine_type": "e2-highcpu-8"}
-}
+{"cpu": "2", "memory": "2Gi", "max_instances": 5, "min_instances": 0, "prebuild": {"dockerfile": "build.Dockerfile", "inputs": ["build.Dockerfile", "postgresql.conf"], "machine_type": "e2-highcpu-8"}}

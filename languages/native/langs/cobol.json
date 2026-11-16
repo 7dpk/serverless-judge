@@ -1,0 +1,26 @@
+{
+  "name": "cobol",
+  "title": "COBOL (GnuCOBOL 3)",
+  "ids": [
+    77
+  ],
+  "source_file": "main.cob",
+  "compile": {
+    "cmd": [
+      "cobc",
+      "-free",
+      "-x",
+      "-O2",
+      "-o",
+      "main",
+      "{options}",
+      "main.cob"
+    ]
+  },
+  "run": {
+    "cmd": [
+      "./main",
+      "{args}"
+    ]
+  }
+}

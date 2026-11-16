@@ -17,22 +17,24 @@ No instances, so no compute. What's left:
 
 | | Idle cost |
 |---|---|
-| Cloud Run, 12 services at zero instances | none |
+| Cloud Run, 17 services at zero instances | none |
 | Pub/Sub topic and subscription with nothing queued | none |
-| Image storage in Artifact Registry | 11 to 18 cents a month: 1.6 GB after a first deploy, 2.3 GB once three versions of each image are kept, at $0.10 per GB above the free 0.5 GB |
+| Image storage in Artifact Registry | 35 to 55 cents a month: 4.0 GB after a first deploy and, by the ratio seen before, up to about 5.8 GB once three versions of each image are kept, at $0.10 per GB above the free 0.5 GB |
 | Firestore: analytics counters, and submissions until they expire | a fraction of a cent: about 1.7 KB of counters per hour that has traffic (measured), stored without indexes |
 | Secret Manager, one key | a few cents a month at most |
 | Cloud Logging, 7-day bucket | none: nothing is logged without traffic |
 
 Image sizes are measured; the prices are list prices on 14 November 2026,
-so this is an estimate and not a bill.
+so this is an estimate and not a bill. Two thirds of the storage is the
+five shared images. To leave some out, deploy with `families` set to the
+ones you want: the first ten alone come to 11 to 18 cents.
 
 Setting `min_instances` or `api_min_instances` above 0 is what turns idle
 cost on: those instances never stop.
 
 ## Image sizes
 
-One image per toolchain and one shared by the API and the worker. Sizes are
+One image per service and one shared by the API and the worker. Sizes are
 compressed, which is what Artifact Registry stores and bills and what Cloud
 Run pulls. Measured on the deployed images on 15 November 2026.
 
@@ -44,13 +46,20 @@ Run pulls. Measured on the deployed images on 15 November 2026.
 | `runner-python` | Python 3.13 | 72 MB |
 | `runner-go` | Go 1.26 | 85 MB |
 | `runner-node` | JavaScript and TypeScript on Node.js 24 | 96 MB |
+| `runner-script` | Ruby, Perl, Lua, Bash, R, SQLite, Plain Text | 125 MB |
 | `runner-gcc` | C and C++ on GCC 14 | 152 MB |
 | `runner-java` | Java on OpenJDK 25 | 159 MB |
 | `runner-mysql` | MySQL 8.4 | 244 MB |
 | `runner-rust` | Rust | 333 MB |
+| `runner-jvm` | Kotlin, Scala, Groovy, Clojure | 351 MB |
 | `runner-dotnet` | C# on .NET 10 | 355 MB |
+| `runner-functional` | Haskell, OCaml, Elixir, Erlang | 382 MB |
+| `runner-native` | Dart, Fortran, Pascal, Objective-C, D, assembly, COBOL, C and C++ on Clang 19 | 680 MB |
+| `runner-swift` | Swift 6.4 | 874 MB |
 
-The eleven add up to 1.6 GB. Two build stages are stored beside them:
-`judge-bin` (3 MB, the runner binary copied into every runner image) and
-`postgres-prebuilt` (158 MB, PostgreSQL as compiled, from which
+The sixteen add up to 4.0 GB. Swift is the largest even after the debugger,
+the package manager and the static libraries are left out of it (the
+toolchain image it starts from is 1.3 GB). Two build stages are stored
+beside them: `judge-bin` (3 MB, the runner binary copied into every runner
+image) and `postgres-prebuilt` (158 MB, PostgreSQL as compiled, from which
 `runner-postgres` takes only what it needs).

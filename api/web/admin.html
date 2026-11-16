@@ -108,6 +108,13 @@
         <label for="tmax">Submissions allowed</label>
         <input id="tmax" type="number" min="1" max="100000" value="500">
       </div>
+      <div id="tnetbox" hidden>
+        <label for="tnet">Network access</label>
+        <select id="tnet">
+          <option value="" selected>No</option>
+          <option value="1">Yes</option>
+        </select>
+      </div>
       <div><button class="primary" id="tcreate">Create token</button></div>
     </div>
     <p class="error" id="terr" role="alert"></p>

@@ -1,0 +1,15 @@
+{
+  "name": "lua",
+  "title": "Lua (5.4)",
+  "ids": [
+    64
+  ],
+  "source_file": "main.lua",
+  "run": {
+    "cmd": [
+      "lua",
+      "main.lua",
+      "{args}"
+    ]
+  }
+}

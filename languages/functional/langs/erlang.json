@@ -1,0 +1,26 @@
+{
+  "name": "erlang",
+  "title": "Erlang (OTP 27)",
+  "ids": [
+    58
+  ],
+  "source_file": "main.erl",
+  "env": {
+    "ERL_AFLAGS": "+JMsingle true +sbwt none +sbwtdcpu none +sbwtdio none"
+  },
+  "compile": {
+    "cmd": [
+      "sh",
+      "-c",
+      "{ echo; cat main.erl; } > run.erl"
+    ]
+  },
+  "run": {
+    "cmd": [
+      "escript",
+      "run.erl",
+      "{args}"
+    ]
+  },
+  "runtime_cpu_ms": 600
+}

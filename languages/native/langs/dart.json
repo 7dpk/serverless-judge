@@ -1,0 +1,27 @@
+{
+  "name": "dart",
+  "title": "Dart (3.14)",
+  "ids": [
+    90
+  ],
+  "source_file": "main.dart",
+  "compile": {
+    "cmd": [
+      "dart",
+      "compile",
+      "exe",
+      "-o",
+      "main",
+      "{options}",
+      "main.dart"
+    ],
+    "cpu_ms": 40000,
+    "wall_ms": 60000
+  },
+  "run": {
+    "cmd": [
+      "./main",
+      "{args}"
+    ]
+  }
+}

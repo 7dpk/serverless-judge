@@ -1,0 +1,15 @@
+{
+  "name": "ruby",
+  "title": "Ruby (3.3)",
+  "ids": [
+    72
+  ],
+  "source_file": "main.rb",
+  "run": {
+    "cmd": [
+      "ruby",
+      "main.rb",
+      "{args}"
+    ]
+  }
+}

@@ -35,26 +35,104 @@ curl -s "$JUDGE_URL/submissions/<token>" -H "X-Auth-Token: $JUDGE_KEY"
 
 Also supported: `GET /languages`, `/statuses`, `/config_info`, `/whoami`,
 `?base64_encoded=true`, `?fields=...`, `callback_url`, `additional_files`,
-`compiler_options`, `command_line_arguments` and
-`redirect_stderr_to_stdout`.
+`compiler_options`, `command_line_arguments`,
+`redirect_stderr_to_stdout` and, where the deployment allows it,
+[`enable_network`](#network-access).
 
 A `wait=true` response carries a `Server-Timing` header that says where the
 time went.
 
 ## Language ids
 
-| Language | ids | | Language | ids |
-|---|---|---|---|---|
-| C (GCC 14) | 50, 103 | | Go 1.26 | 60, 107 |
-| C++ (GCC 14, C++20) | 54, 105 | | PHP 8.4 | 68, 98 |
-| Python 3.13 | 71, 100 | | Rust (stable) | 73, 108 |
-| JavaScript (Node 24) | 63, 102 | | C# (.NET 10) | 51 |
-| TypeScript 7 | 74, 101 | | PostgreSQL 18 | 201 |
-| Java 25 | 62, 91 | | MySQL 8.4 | 202 |
+| Language | ids | Service |
+|---|---|---|
+| C (GCC 14, C17) | 50, 103 | `gcc` |
+| C++ (GCC 14, C++20) | 54, 105 | `gcc` |
+| Python (3.13) | 71, 100 | `python` |
+| JavaScript (Node.js 24) | 63, 102 | `node` |
+| TypeScript (7.0, Node.js 24) | 74, 101 | `node` |
+| Java (OpenJDK 25) | 62, 91 | `java` |
+| C# (.NET 10) | 51 | `dotnet` |
+| Go (1.26) | 60, 107 | `go` |
+| PHP (8.4) | 68, 98 | `php` |
+| Rust (stable, edition 2024) | 73, 108 | `rust` |
+| PostgreSQL (18) | 201 | `postgres` |
+| MySQL (8.4) | 202 | `mysql` |
+| Plain Text | 43 | `script` |
+| Bash (5.2) | 46 | `script` |
+| Lua (5.4) | 64 | `script` |
+| Ruby (3.3) | 72 | `script` |
+| R (4.5) | 80, 99 | `script` |
+| SQL (SQLite 3.46) | 82 | `script` |
+| Perl (5.40) | 85 | `script` |
+| Kotlin (2.4) | 78, 111 | `jvm` |
+| Scala (3.3) | 81 | `jvm` |
+| Clojure (1.12) | 86 | `jvm` |
+| Groovy (6.0) | 88 | `jvm` |
+| Swift (6.4) | 83 | `swift` |
+| Elixir (1.18) | 57 | `functional` |
+| Erlang (OTP 27) | 58 | `functional` |
+| Haskell (GHC 9.6) | 61 | `functional` |
+| OCaml (5.3) | 65 | `functional` |
+| Assembly (NASM 2.16, x86-64) | 45 | `native` |
+| D (GDC 14) | 56 | `native` |
+| Fortran (GFortran 14) | 59 | `native` |
+| Pascal (FPC 3.2) | 67 | `native` |
+| C (Clang 19, C17) | 75, 104, 110 | `native` |
+| C++ (Clang 19, C++20) | 76 | `native` |
+| COBOL (GnuCOBOL 3) | 77 | `native` |
+| Objective-C (Clang 19, GNUstep) | 79 | `native` |
+| Dart (3.14) | 90 | `native` |
+
+The service is the folder under `languages/` whose image has the language.
+Languages in the same service share its instances.
 
 Ids are set in each `languages/<family>/langs/<name>.json`. If your client
 already uses some other id for a language, add it to the `ids` list and
 redeploy that family.
+
+## Network access
+
+A sandbox has no network. A submission can ask for one with Judge0's own
+field:
+
+```bash
+curl -s "$JUDGE_URL/submissions?wait=true" -H "X-Auth-Token: $JUDGE_KEY" -H 'Content-Type: application/json' \
+  -d '{"language_id": 71, "enable_network": true, "network_time_limit": 45,
+       "source_code": "import urllib.request\nprint(len(urllib.request.urlopen(\"https://example.com\").read()))"}'
+```
+
+It is off unless the deployment turns it on (`allow_network = true` in
+Terraform, `ALLOW_NETWORK=1` with `deploy.sh`). Where it is off, the field
+is ignored as it always was: the program runs without a network and the
+submission reads `enable_network: false`. `GET /config_info` says which
+(`allow_enable_network`) and lists the limits.
+
+Where it is on:
+
+| | Default | |
+|---|---|---|
+| Who may ask | admin keys | A temporary token only if it was created with `"network": true`; otherwise 422 |
+| Download size | 125 MB | What a run may receive in total, and the largest file it may write. Past it the run ends as Runtime Error (SIGXFSZ) with the message "download limit exceeded", or with the program's own "File too large" error |
+| Network time | 30 s, at most 60 | Added to `wall_time_limit`, for time spent waiting on the network. Set per submission with `network_time_limit` |
+| CPU time | unchanged | Receiving data costs CPU that isn't the program's work: 6 to 14 ms per MB when measured. 15 ms per MB received is added to the limit and taken off `time`, so a run that only downloads reads close to 0 |
+
+The deployment's side of these is `network_time_limit`,
+`max_network_time_limit` and `max_download_mb` (see
+[Deploying](deploying.md#with-terraform)).
+
+What such a run can and can't reach, as measured: any public host on any
+TCP port except 25, over IPv4. Not the metadata server, not the runner that
+hosts the sandbox, and nothing in a VPC, because the runner services aren't
+attached to one. Cloud Run has no filter to narrow that, so treat the right
+to ask for network access as the right to make requests to the internet
+from your project, and give it to callers you trust.
+[Architecture](architecture.md#safety) has more on how the limits are
+enforced.
+
+A run with network access gets a sandbox of its own, created for it, so it
+starts about 0.2 s later than one that takes a waiting sandbox, and
+submissions with it are never grouped.
 
 ## Differences from Judge0
 
@@ -71,7 +149,26 @@ redeploy that family.
   tab-separated with a header row, `NULL` spelled out. The time limit is
   wall-clock.
 - **TypeScript** is type-checked; a type error is a Compilation Error.
-- **Java** source must declare `class Main`.
+- **Java** source must declare `class Main`. Kotlin is compiled as
+  `Main.kt` (so `fun main` becomes `MainKt`), and Scala must define
+  `object Main`.
+- **Slow starters.** For Elixir, Erlang, Clojure and Groovy, an allowance
+  for the CPU their runtime needs just to start is added to the limit and
+  taken off `time`, so the 2 s limit applies to the program: 0.6 s for
+  Erlang, 1.0 s for Elixir and Clojure, 1.5 s for Groovy. An empty program
+  costs about that much on an instance that has just started and less on a
+  warm one, so a small program often reads 0.
+- **SQL (SQLite)** runs `source_code` against an empty `db.sqlite`, or
+  against the one in `additional_files`, as Judge0 does. `stdin` is not
+  read. The two database servers work differently: see the SQL entry above.
+- **Objective-C** is Clang with GNUstep's Foundation on the GNU runtime, as
+  in Judge0: literals and `@autoreleasepool` work, ARC and object
+  subscripting don't.
+- **COBOL** programs print one line about libxml versions on `stderr`. It
+  comes from Debian's GnuCOBOL package, not from the program.
+- **`enable_network`** is ignored unless the deployment allows it, and has
+  limits when it does: see [Network access](#network-access).
+  `network_time_limit` is an extra field.
 - **`GET /languages`** adds a `key` to each entry (`python`, `cpp`, ...) so
   a client can tell which ids are the same language.
 
@@ -83,7 +180,7 @@ its hash is stored, so it is shown once.
 
 ```bash
 curl -s -X POST "$JUDGE_URL/admin/tokens" -H "X-Auth-Token: $JUDGE_KEY" -H 'Content-Type: application/json' \
-  -d '{"label": "QA team", "ttl_hours": 24, "max_submissions": 500}'
+  -d '{"label": "QA team", "ttl_hours": 24, "max_submissions": 500}'    # add "network": true to allow enable_network
 curl -s "$JUDGE_URL/admin/tokens" -H "X-Auth-Token: $JUDGE_KEY"          # label, expiry, usage
 curl -s -X DELETE "$JUDGE_URL/admin/tokens/<id>" -H "X-Auth-Token: $JUDGE_KEY"
 ```
