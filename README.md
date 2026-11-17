@@ -4,22 +4,27 @@
 [![API: Judge0 compatible](https://img.shields.io/badge/API-Judge0%20compatible-2ea44f.svg)](docs/api.md)
 [![Runs on Cloud Run](https://img.shields.io/badge/runs%20on-Cloud%20Run-4285F4.svg)](docs/deploying.md)
 
-**A code judge that costs nothing while nobody is using it.**
+**A pure Serverless code judge.**
 
-It speaks the [Judge0](https://ce.judge0.com) API, runs every submission in
-its own throwaway sandbox, and lives entirely on Google Cloud Run. When the
-last request finishes, everything scales back to zero and waits for the
-next one.
+ I've been using [Judge0](https://ce.judge0.com) extensively for our code execution needs. It's cool and fast, but the requirement for an always-on server, Redis, PostgreSQL, and workers makes it rather expensive to adopt for smaller projects and organizations.
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.gif">
-    <img src="docs/how-it-works.gif" width="880" alt="Animation in five steps. 1: nobody is submitting, nothing is running and compute billing is off. 2: a submission arrives and the API and the runner for that language start. 3: the code runs in its own sandbox, which is destroyed afterwards. 4: a burst is queued and the runners scale out to four instances. 5: traffic stops and everything returns to zero.">
-  </picture>
-</p>
+So, I've been working on something similar that aims to be just as fast while significantly reducing costs and handling generous traffic spikes (20K submissions in 2 minutes for approximately $0.67).
 
-<details>
-<summary><b>Too quick? Here are the same five steps as still pictures.</b></summary>
+Google Cloud Run seems like a fascinating option because of its ability to scale up quickly and scale down to zero when idle. Essentially, it's a pay-as-you-code Judge!
+
+I've included the load-testing statistics below so you can estimate the cost for your own use case.
+
+It runs on Cloud Run sandboxes, making it extremely secure while requiring virtually zero maintenance.
+
+(At least until an AGI tries to hack it. 😉)
+
+Let me know if you're looking forward to improve and use it, I would like to learn how it's being used and how can it be improved.
+
+It API is same as [Judge0](https://ce.judge0.com), runs every submission in
+its own secure throwaway sandbox, and lives entirely on Google Cloud Run. Scales to 0 when not in use and can handle 300+ executions per seconds in 30-60s after scaling
+
+
+<summary><b>Here are the simple five steps to understand it quickly.</b></summary>
 <br>
 
 **1. Nobody is submitting.** Nothing is running, so there's no compute to
@@ -61,20 +66,6 @@ shut down within 15 minutes.
   <source media="(prefers-color-scheme: dark)" srcset="docs/steps/step-5-dark.png">
   <img src="docs/steps/step-5.png" width="760" alt="Step 5: everything is back at zero instances and compute billing is off.">
 </picture>
-
-</details>
-
-## Why
-
-Judge0 is the usual answer for running untrusted code, and it's a good one.
-The catch is that it wants servers that are up all day and sized for your
-busiest hour, while real traffic comes in bursts: a contest opens, a class
-sits a test, and then it's quiet again.
-
-I wanted the same API without paying for the quiet hours. Cloud Run now has
-[sandboxes](https://docs.cloud.google.com/run/docs/code-execution), which
-was the missing piece: every submission gets a fresh isolated box, and
-Cloud Run takes care of starting and stopping the machines around it.
 
 ## What you get
 
